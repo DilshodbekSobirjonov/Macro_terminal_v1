@@ -48,4 +48,4 @@ def validate_entry(impulse):
     if bias == "SHORT" and cvd > 0:
         return None
 
-    return last.close
+    return last.close 
