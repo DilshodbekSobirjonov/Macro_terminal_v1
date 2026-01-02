@@ -22,6 +22,18 @@ from dotenv import load_dotenv
 # === SERVICES ===
 from services.exchange import ExchangeService
 from
+# main.py
+
+import os
+import time
+import threading
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+# === SERVICES ===
+from services.exchange import ExchangeService
+from
 
 # === SIGNALS (NEW STRATEGY) ===
 from signals.generator import generate_signal
