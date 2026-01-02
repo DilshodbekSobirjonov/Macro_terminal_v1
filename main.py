@@ -20,6 +20,8 @@ from trades.trade import Trade
 from trades.monitor import monitor_trade
 from config.symbols import SYMBOLS
 
+from services.stats import calculate_stats, daily_range, weekly_range
+
 # ================= LOAD ENV =================
 
 load_dotenv()
