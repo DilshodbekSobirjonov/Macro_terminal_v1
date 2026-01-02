@@ -1,15 +1,4 @@
-# main.py
-
-import os
-import time
-import threading
-from datetime import datetime, timezone
-
-from dotenv import load_dotenv
-
-# === SERVICES ===
-from services.exchange import ExchangeService
-from services.telegram import TelegramService
+ services.telegram import TelegramService
 from services.db import Database
 from services.commands import handle_command
 from services.stats import calculate_stats, daily_range
@@ -21,8 +10,18 @@ from core.regime import market_regime
 from core.universe import filter_symbols
 
 # === TRADES ===
-from trades.trade import open_trade, calc_sl_tp
-from trades.monitor import monitor_trade
+# main.py
+
+import os
+import time
+import threading
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+# === SERVICES ===
+from services.exchange import ExchangeService
+from
 
 # === SIGNALS (NEW STRATEGY) ===
 from signals.generator import generate_signal
