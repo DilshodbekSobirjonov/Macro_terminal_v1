@@ -154,7 +154,7 @@ if __name__ == "__main__":
     while True:
         try:
             run_cycle()
-            time.sleep(5)# 30 минут
+            time.sleep(30 * 60)# 30 минут
         except Exception as e:
             telegram.send_admin(f"⚠️ ERROR:\n{str(e)}")
             time.sleep(60)
