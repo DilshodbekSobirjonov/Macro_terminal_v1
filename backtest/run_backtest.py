@@ -30,7 +30,7 @@ def run():
         last = window[-1]
 
         score, reasons = calculate_score(window)
-    if score > 0:
+if score > 0:
         print(i, "SCORE:", score, reasons)
         atr = calculate_atr(window)
 
