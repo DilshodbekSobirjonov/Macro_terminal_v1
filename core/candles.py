@@ -1,48 +1,50 @@
 # core/candles.py
 
-import pandas as pd
 from datetime import datetime
 
 
+class Candle:
+    def init(self, timestamp, open_, high, low, close, volume):
+        self.timestamp = timestamp
+        self.time = datetime.fromtimestamp(timestamp / 1000)
+
+        self.open = open_
+        self.high = high
+        self.low = low
+        self.close = close
+        self.volume = volume
+
+        # дополнительные поля (позже)
+        self.oi = None
+        self.oi_delta = None
+        self.atr = None
+
+
 class CandleFrame:
-    def __init__(self, ohlcv, oi_series=None):
-        """
-        ohlcv: list from ccxt
-        oi_series: dict {timestamp: oi}
-        """
-        self.df = self._build_dataframe(ohlcv, oi_series)
+    def init(self, ohlcv, oi_series=None):
+        self.candles = self._build(ohlcv, oi_series)
 
-    def _build_dataframe(self, ohlcv, oi_series):
-        df = pd.DataFrame(
-            ohlcv,
-            columns=[
-                "timestamp",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume"
-            ]
-        )
+    def _build(self, ohlcv, oi_series):
+        candles = []
+        prev_oi = None
 
-        df["time"] = pd.to_datetime(df["timestamp"], unit="ms")
-        df.set_index("time", inplace=True)
+        for row in ohlcv:
+            ts, o, h, l, c, v = row
+            candle = Candle(ts, o, h, l, c, v)
 
-        # OI delta
-        if oi_series:
-            df["oi"] = df["timestamp"].map(oi_series)
-            df["oi_delta"] = df["oi"].diff()
-        else:
-            df["oi"] = None
-            df["oi_delta"] = None
+            if oi_series and ts in oi_series:
+                candle.oi = oi_series[ts]
+                if prev_oi is not None:
+                    candle.oi_delta = candle.oi - prev_oi
+                prev_oi = candle.oi
 
-        return df
+            candles.append(candle)
+
+        return candles
 
     def last_closed(self):
-        """
-        Возвращает последнюю ЗАКРЫТУЮ свечу
-        """
-        return self.df.iloc[-2]
+        # последняя ЗАКРЫТАЯ свеча
+        return self.candles[-2]
 
     def recent(self, n=20):
-        return self.df.tail(n)
+        return self.candles[-n:]
