@@ -11,6 +11,8 @@ class TelegramService:
         self.base_url = f"https://api.telegram.org/bot{token}"
         self.offset = 0
 
+    # ---------------- SEND ----------------
+
     def _send(self, chat_id, text):
         url = f"{self.base_url}/sendMessage"
         payload = {
@@ -18,46 +20,48 @@ class TelegramService:
             "text": text,
             "parse_mode": "HTML"
         }
-        requests.post(url, json=payload, timeout=10)
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except requests.RequestException:
+            pass
 
-    # 📢 канал
     def send_channel(self, text):
         self._send(self.channel_id, text)
 
-    # 👤 админ
     def send_admin(self, text):
         self._send(self.admin_id, text)
 
-    # 📥 получить команды
+    # ---------------- COMMANDS ----------------
+
     def fetch_commands(self):
-    url = f"{self.base_url}/getUpdates"
-    params = {
-        "offset": self.offset,
-        "timeout": 0
-    }
+        url = f"{self.base_url}/getUpdates"
+        params = {
+            "offset": self.offset,
+            "timeout": 0
+        }
 
-    try:
-        r = requests.get(url, params=params, timeout=5)
-        r.raise_for_status()
-    except requests.RequestException:
-        # сеть недоступна — просто молчим
-        return []
+        try:
+            r = requests.get(url, params=params, timeout=5)
+            r.raise_for_status()
+        except requests.RequestException:
+            return []
 
-    updates = r.json().get("result", [])
-    commands = []
+        data = r.json()
+        updates = data.get("result", [])
+        commands = []
 
-    for u in updates:
-        self.offset = u["update_id"] + 1
+        for update in updates:
+            self.offset = update["update_id"] + 1
 
-        msg = u.get("message")
-        if not msg:
-            continue
+            message = update.get("message")
+            if not message:
+                continue
 
-        if msg["chat"]["id"] != int(self.admin_id):
-            continue
+            if message["chat"]["id"] != int(self.admin_id):
+                continue
 
-        text = msg.get("text", "")
-        if text.startswith("/"):
-            commands.append(text)
+            text = message.get("text", "")
+            if text.startswith("/"):
+                commands.append(text)
 
-    return commands
+        return commands
