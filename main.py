@@ -1,9 +1,10 @@
 # main.py
 
-import time
 import os
+import time
 import threading
 from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 
 from services.exchange import ExchangeService
@@ -11,19 +12,20 @@ from services.telegram import TelegramService
 from services.db import Database
 from services.commands import handle_command
 from services.stats import calculate_stats, daily_range
+from services.logger import setup_logger
 
 from core.candles import CandleFrame
 from core.scoring import calculate_score
 from core.structure import MarketStructure
 from core.regime import market_regime
+from core.universe import filter_symbols
 
 from trades.trade import Trade
 from trades.monitor import monitor_trade
 
-from config.symbols import SYMBOLS
-from core.universe import filter_symbols
-
-# ================= LOAD ENV =================
+# =========================================================
+# ENV
+# =========================================================
 
 load_dotenv()
 
@@ -32,74 +34,86 @@ TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 if not TG_TOKEN or not TG_CHANNEL_ID or not ADMIN_CHAT_ID:
-    raise RuntimeError("Telegram ENV variables not set")
+    raise RuntimeError("Telegram ENV not set")
 
-# ================= CONFIG =================
+# =========================================================
+# CONFIG
+# =========================================================
 
 TIMEFRAME = "30m"
 MIN_SCORE = 5
-MARKET_SLEEP = 30 * 60   # 30 минут
-COMMAND_SLEEP = 3        # 3 секунды
 
-# ==========================================
+MARKET_SLEEP = 30 * 60     # 30 min
+COMMAND_SLEEP = 3          # 3 sec
+WATCHDOG_TIMEOUT = 60 * 60 # 1 hour
+
+# =========================================================
+# SERVICES
+# =========================================================
 
 exchange = ExchangeService()
 telegram = TelegramService(TG_TOKEN, TG_CHANNEL_ID, ADMIN_CHAT_ID)
 db = Database()
+logger = setup_logger()
 
 active_trades = db.load_active_trades()
 
-# Глобальное состояние (для команд)
+# shared state
 current_regime = "UNKNOWN"
 last_cycle_time = "N/A"
+last_market_tick = time.time()
 
 # =========================================================
-# MARKET LOGIC
+# MARKET CYCLE
 # =========================================================
 
 def run_market_cycle():
-    global active_trades, current_regime, last_cycle_time
+    global active_trades, current_regime, last_cycle_time, last_market_tick
 
+    last_market_tick = time.time()
     last_cycle_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    analyzed = []
+    analyzed = 0
     signals = 0
 
-    # 🌍 MARKET REGIME (BTC 4H)
+    # -------- BTC REGIME --------
     btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=250)
     btc_candles = CandleFrame(btc_ohlcv)
     current_regime = market_regime(btc_candles.candles)
 
-    # 🔎 DYNAMIC SYMBOL UNIVERSE  ✅ ОБЯЗАТЕЛЬНО
+    # -------- DYNAMIC UNIVERSE --------
     tickers = exchange.fetch_tickers()
     symbols = filter_symbols(tickers)
 
     for symbol in symbols:
-        # дальше логика:
-        # --- DATA ---
+        analyzed += 1
+
+        # --- data ---
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
-        oi_series = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
-        candles = CandleFrame(ohlcv, oi_series)
+        oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
 
-        analyzed.append(symbol)
+        if not ohlcv:
+            continue
 
-        # --- SCORING ---
+        candles = CandleFrame(ohlcv, oi)
+
+        # --- scoring ---
         score, reasons = calculate_score(candles.candles)
         structure = MarketStructure(candles.candles)
 
-        # --- ENTRY ---
+        # --- entry ---
         if (
             current_regime == "RISK_ON"
             and score >= MIN_SCORE
             and structure.detect_choch()
             and not any(t.pair == symbol and t.state == "ACTIVE" for t in active_trades)
         ):
-            entry_price = candles.candles[-2].close
+            entry = candles.candles[-2].close
 
             trade = Trade(
                 pair=symbol,
                 direction="LONG",
-                entry_price=entry_price,
+                entry_price=entry,
                 score=score,
                 reasons=reasons,
                 tp_levels=[3, 6, 10],
@@ -110,20 +124,27 @@ def run_market_cycle():
             db.save_trade(trade)
             signals += 1
 
+            logger.info(f"SIGNAL {symbol} score={score}")
+
             telegram.send_channel(
                 f"🟢 <b>SIGNAL</b>\n\n"
-                f"<b>PAIR:</b> {symbol}\n"
-                f"<b>ENTRY:</b> {entry_price}\n"
-                f"<b>SCORE:</b> {score}\n\n"
+                f"{symbol}\n"
+                f"ENTRY: {entry}\n"
+                f"SCORE: {score}\n\n"
                 + "\n".join(f"• {r}" for r in reasons)
             )
 
-        # --- MONITORING ---
+        # --- monitoring ---
         for trade in active_trades[:]:
             event = monitor_trade(trade, candles.candles)
 
             if event and trade.state == "CLOSED":
                 db.close_trade(trade)
+                active_trades.remove(trade)
+
+                logger.info(
+                    f"CLOSED {trade.pair} pnl={trade.current_profit:.2f}"
+                )
 
                 telegram.send_channel(
                     f"❌ <b>CLOSED</b>\n\n"
@@ -132,17 +153,15 @@ def run_market_cycle():
                     f"Reason: {trade.closed_reason}"
                 )
 
-                active_trades.remove(trade)
-
-    # 👤 HEARTBEAT
+    # -------- HEARTBEAT --------
     telegram.send_admin(
         f"🧠 <b>MacroTerminal heartbeat</b>\n\n"
         f"Time: {last_cycle_time}\n"
-        f"Market regime: {current_regime}\n"
-        f"Analyzed symbols: {len(analyzed)}\n"
-        f"Signals this cycle: {signals}\n"
+        f"Regime: {current_regime}\n"
+        f"Universe: {len(symbols)}\n"
+        f"Analyzed: {analyzed}\n"
+        f"Signals: {signals}\n"
         f"Active trades: {len(active_trades)}"
-        f"Universe size: {len(symbols)}\n"
     )
 
 # =========================================================
@@ -154,7 +173,7 @@ def market_loop():
         try:
             run_market_cycle()
 
-            # 📊 DAILY STATS (1 раз в день на 00 UTC)
+            # daily stats @ 00 UTC
             if last_cycle_time.endswith("00 UTC"):
                 results = db.get_closed_trades(daily_range())
                 stats = calculate_stats(results)
@@ -164,7 +183,7 @@ def market_loop():
                         f"📊 <b>DAILY STATS</b>\n\n"
                         f"Trades: {stats['trades']}\n"
                         f"Winrate: {stats['winrate']:.1f}%\n"
-                        f"Avg return: {stats['avg_return']:.2f}%\n"
+                        f"Avg: {stats['avg_return']:.2f}%\n"
                         f"Best: {stats['best']:.2f}%\n"
                         f"Worst: {stats['worst']:.2f}%"
                     )
@@ -172,9 +191,7 @@ def market_loop():
             time.sleep(MARKET_SLEEP)
 
         except Exception as e:
-            # сетевые ошибки не спамим
-            if "Network is unreachable" not in str(e):
-                telegram.send_admin(f"⚠️ MARKET ERROR:\n{str(e)}")
+            logger.error(str(e))
             time.sleep(60)
 
 
@@ -196,8 +213,15 @@ def command_loop():
             time.sleep(COMMAND_SLEEP)
 
         except Exception:
-            # команды не критичны
             time.sleep(5)
+
+
+def watchdog_loop():
+    while True:
+        if time.time() - last_market_tick > WATCHDOG_TIMEOUT:
+            telegram.send_admin("🛑 WATCHDOG: market loop stalled. Restart bot.")
+            os._exit(1)
+        time.sleep(60)
 
 # =========================================================
 # START
@@ -205,12 +229,11 @@ def command_loop():
 
 if __name__ == "__main__":
     telegram.send_admin("🤖 MacroTerminal started")
+    logger.info("MacroTerminal boot")
 
-    t_market = threading.Thread(target=market_loop, daemon=True)
-    t_cmd = threading.Thread(target=command_loop, daemon=True)
+    threading.Thread(target=market_loop, daemon=True).start()
+    threading.Thread(target=command_loop, daemon=True).start()
+    threading.Thread(target=watchdog_loop, daemon=True).start()
 
-    t_market.start()
-    t_cmd.start()
-
-    t_market.join()
-    t_cmd.join()
+    while True:
+        time.sleep(60)
