@@ -23,6 +23,26 @@ from core.universe import filter_symbols
 from trades.trade import Trade
 from trades.monitor import monitor_trade
 
+from signals.generator import generate_signal
+from signals.validator import validate_entry
+from trades.trade import open_trade, calc_sl_tp
+
+impulse = generate_signal(symbol)
+
+if impulse:
+    entry_price = validate_entry(impulse)
+
+    if entry_price:
+        sl, tp = calc_sl_tp(entry_price, impulse)
+
+        open_trade(
+            symbol=symbol,
+            side=impulse["bias"],
+            entry_price=entry_price,
+            stop_loss=sl,
+            take_profit=tp
+        )
+
 # =========================================================
 # ENV
 # =========================================================
