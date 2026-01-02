@@ -1,8 +1,8 @@
 # signals/generator.py
 
 from services.exchange import ExchangeService
-from services.indicators import EMA, ATR
-from services.structure import detect_strong_bos
+from core.indicators import EMA, ATR
+from core.structure import detect_strong_bos
 from core.candles import CandleFrame
 
 exchange = ExchangeService()
