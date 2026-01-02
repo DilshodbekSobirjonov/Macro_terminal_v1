@@ -3,22 +3,28 @@
 import sys
 import os
 
-# добавляем корень проекта в PYTHONPATH
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# добавляем корень проекта
+sys.path.append(
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..")
+    )
+)
 
 from services.exchange import ExchangeService
 from core.candles import CandleFrame
 from core.scoring import calculate_score
-from core.indicators import calculate_atr
 
 # ================= CONFIG =================
 
-SYMBOL = "BTCUSDT"     # можно менять на SOLUSDT, INJUSDT и т.д.
+SYMBOL = "SOLUSDT"      # BTCUSDT | SOLUSDT | INJUSDT | OPUSDT
 TIMEFRAME = "30m"
-LIMIT = 1499           # ~60 дней для 30m
-MIN_SCORE = 4          # для диагностики
+LIMIT = 1500
+
+MIN_SCORE = 4
 TP_PERCENT = 6.0
 SL_PERCENT = 4.5
+
+COOLDOWN_CANDLES = 20   # запрет повторного входа
 
 # ========================================
 
@@ -29,33 +35,45 @@ def run():
     print("Running backtest...")
     print("Symbol:", SYMBOL)
 
-    # -------- LOAD DATA --------
-    ohlcv = exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=LIMIT)
-    oi = exchange.fetch_open_interest_history(SYMBOL, TIMEFRAME, limit=LIMIT)
+    ohlcv = exchange.fetch_ohlcv(
+        SYMBOL,
+        TIMEFRAME,
+        limit=LIMIT
+    )
+
+    oi = exchange.fetch_open_interest_history(
+        SYMBOL,
+        TIMEFRAME,
+        limit=LIMIT
+    )
 
     if not ohlcv:
         print("No OHLCV data")
         return
 
-    candles = CandleFrame(ohlcv, oi).candles
+    candles = CandleFrame(
+        ohlcv,
+        oi
+    ).candles
 
     trades = []
     active_trade = None
+    last_exit_index = -1000
 
-    # -------- MAIN LOOP --------
     for i in range(50, len(candles)):
         window = candles[:i]
         last = window[-1]
 
         score, reasons = calculate_score(window)
 
-        # ===== DIAGNOSTIC OUTPUT =====
-        if score > 0:
-            print(i, "SCORE:", score, reasons)
-
-        # -------- ENTRY --------
-        if active_trade is None and score >= MIN_SCORE:
+        # ---------- ENTRY ----------
+        if (
+            active_trade is None
+            and score >= MIN_SCORE
+            and i - last_exit_index > COOLDOWN_CANDLES
+        ):
             entry_price = last.close
+
             sl_price = entry_price * (1 - SL_PERCENT / 100)
             tp_price = entry_price * (1 + TP_PERCENT / 100)
 
@@ -66,19 +84,19 @@ def run():
                 "open_index": i
             }
 
-        # -------- EXIT --------
+        # ---------- EXIT ----------
         if active_trade is not None:
-            # стоп
             if last.low <= active_trade["sl"]:
                 trades.append(-SL_PERCENT)
+                last_exit_index = i
                 active_trade = None
 
-            # тейк
             elif last.high >= active_trade["tp"]:
                 trades.append(TP_PERCENT)
+                last_exit_index = i
                 active_trade = None
 
-    # -------- RESULTS --------
+    # ---------- RESULTS ----------
     print("\n===== BACKTEST RESULT =====")
     print("Symbol:", SYMBOL)
     print("Trades:", len(trades))
