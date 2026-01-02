@@ -1,8 +1,8 @@
 # signals/validator.py
 
 from services.exchange import ExchangeService
-from services.indicators import EMA
-from services.structure import detect_choch
+from core.indicators import EMA
+from core.structure import detect_choch
 from core.candles import CandleFrame
 
 exchange = ExchangeService()
