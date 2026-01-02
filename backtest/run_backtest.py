@@ -16,7 +16,7 @@ from core.indicators import calculate_atr
 SYMBOL = "BTCUSDT"     # можно менять на SOLUSDT, INJUSDT и т.д.
 TIMEFRAME = "30m"
 LIMIT = 1499           # ~60 дней для 30m
-MIN_SCORE = 1          # для диагностики
+MIN_SCORE = 4          # для диагностики
 TP_PERCENT = 6.0
 SL_PERCENT = 4.5
 
