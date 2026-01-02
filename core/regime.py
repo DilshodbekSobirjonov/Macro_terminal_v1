@@ -1,6 +1,6 @@
 # core/regime.py
 
-from core.indicators import calculate_atr, atr_regime
+from core.indicators import atr_regime
 
 
 def ema(values, period):
@@ -12,6 +12,9 @@ def ema(values, period):
 
 
 def btc_trend(candles):
+    """
+    Определяет направление тренда BTC по EMA50 / EMA200
+    """
     closes = [c.close for c in candles]
 
     if len(closes) < 200:
@@ -27,10 +30,36 @@ def btc_trend(candles):
 
 
 def market_regime(btc_candles):
+    """
+    Возвращает:
+    - RISK_ON
+    - NEUTRAL
+    - RISK_OFF
+    """
+
+    # защита от малого количества данных
+    if len(btc_candles) < 220:
+        return "RISK_OFF"
+
     trend = btc_trend(btc_candles)
     atr_state = atr_regime(btc_candles)
 
-    if trend == "BULL" and atr_state != "overheated":
+    # -------------------------------
+    # 🔴 RISK_OFF — защита капитала
+    # -------------------------------
+    if trend == "BEAR":
+        return "RISK_OFF"
+
+    if atr_state == "overheated":
+        return "RISK_OFF"
+
+    # -------------------------------
+    # 🟢 RISK_ON — можно рисковать
+    # -------------------------------
+    if trend == "BULL" and atr_state == "expansion":
         return "RISK_ON"
 
-    return "RISK_OFF"
+    # -------------------------------
+    # 🟡 NEUTRAL — торгуем аккуратно
+    # -------------------------------
+    return "NEUTRAL"
