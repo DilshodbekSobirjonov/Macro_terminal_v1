@@ -2,10 +2,9 @@
 
 from services.exchange import ExchangeService
 from core.candles import CandleFrame
-from core.structure import detect_choch
+from core.structure import MarketStructure
 
 exchange = ExchangeService()
-
 LOW_TF = "5m"
 
 
@@ -16,17 +15,16 @@ def in_pullback(price, low, high):
 
 
 def validate_entry(impulse):
-    """
-    FINAL ENTRY CONFIRMATION
-    """
     symbol = impulse["symbol"]
 
     ohlcv = exchange.fetch_ohlcv(symbol, LOW_TF, limit=60)
     if not ohlcv:
         return None
 
-    candles = CandleFrame(ohlcv).candles
-    last = candles[-1]
+    candles = CandleFrame(ohlcv)
+    structure = MarketStructure(candles.candles)
+
+    last = candles.candles[-1]
 
     # 1️⃣ Pullback
     if not in_pullback(
@@ -36,13 +34,14 @@ def validate_entry(impulse):
     ):
         return None
 
-    # 2️⃣ CHoCH
-    if not detect_choch(candles):
+    # 2️⃣ CHoCH (реальный метод)
+    if not structure.detect_choch():
         return None
 
     # 3️⃣ Rejection candle
     body = abs(last.close - last.open)
     rng = last.high - last.low
+
     if rng == 0 or body / rng < 0.4:
         return None
 
