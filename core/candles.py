@@ -14,7 +14,6 @@ class Candle:
         self.close = close
         self.volume = volume
 
-        # дополнительные поля (позже)
         self.oi = None
         self.oi_delta = None
         self.atr = None
@@ -43,7 +42,6 @@ class CandleFrame:
         return candles
 
     def last_closed(self):
-        # последняя ЗАКРЫТАЯ свеча
         return self.candles[-2]
 
     def recent(self, n=20):
