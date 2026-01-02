@@ -2,7 +2,7 @@
 
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from services.exchange import ExchangeService
@@ -47,7 +47,7 @@ active_trades = db.load_active_trades()
 def run_cycle():
     global active_trades
 
-    cycle_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    cycle_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     analyzed = []
     signals = 0
