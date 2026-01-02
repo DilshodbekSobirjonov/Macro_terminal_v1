@@ -1,39 +1,20 @@
 # signals/generator.py
 
 from services.exchange import ExchangeService
-from core.indicators import EMA, ATR
-from core.structure import detect_strong_bos
 from core.candles import CandleFrame
+from core.structure import detect_strong_bos
+from core.indicators import calculate_atr, volume_anomaly, oi_delta_positive, atr_regime
 
 exchange = ExchangeService()
 
 TIMEFRAME = "30m"
 
 
-def get_htf_bias(symbol):
-    ohlcv = exchange.fetch_ohlcv(symbol, "4h", limit=200)
-    if not ohlcv:
-        return None
-
-    candles = CandleFrame(ohlcv).candles
-    ema50 = EMA(candles, 50)
-    ema200 = EMA(candles, 200)
-
-    if ema50[-1] > ema200[-1]:
-        return "LONG"
-    if ema50[-1] < ema200[-1]:
-        return "SHORT"
-    return None
-
-
 def generate_signal(symbol):
     """
-    IMPULSE DETECTOR (НЕ ВХОД)
+    IMPULSE DETECTOR
+    Возвращает impulse или None
     """
-    bias = get_htf_bias(symbol)
-    if bias is None:
-        return None
-
     ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
     oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
 
@@ -42,40 +23,32 @@ def generate_signal(symbol):
 
     candles = CandleFrame(ohlcv, oi).candles
 
-    # 1️⃣ Strong BOS в сторону HTF
-    if not detect_strong_bos(candles, bias):
+    # 1️⃣ Strong BOS
+    if not detect_strong_bos(candles):
         return None
 
-    # 2️⃣ ATR filter (не перегрето)
-    atr = ATR(candles, 14)
-    atr_now = atr[-1]
-    atr_mean = sum(atr[-20:]) / 20
-
-    if atr_now > atr_mean * 1.6:
+    # 2️⃣ ATR regime — не перегрето
+    atr_state = atr_regime(candles)
+    if atr_state != "expansion":
         return None
 
-    # 3️⃣ Volume spike
-    volumes = [c.volume for c in candles[-20:]]
-    vol_mean = sum(volumes) / len(volumes)
-    if candles[-1].volume < vol_mean * 1.7:
+    # 3️⃣ Volume anomaly
+    if not volume_anomaly(candles, multiplier=1.5):
         return None
 
     # 4️⃣ OI direction
-    if not oi or len(oi) < 2:
+    if not oi_delta_positive(candles):
         return None
 
-    oi_delta = oi[-1]["openInterest"] - oi[-2]["openInterest"]
-
-    if bias == "LONG" and oi_delta <= 0:
-        return None
-    if bias == "SHORT" and oi_delta >= 0:
+    # 5️⃣ ATR value (для SL)
+    atr = calculate_atr(candles)
+    if atr is None:
         return None
 
-    # ⛔ НЕ ВХОДИМ, ТОЛЬКО ФИКСИРУЕМ ИМПУЛЬС
     return {
         "symbol": symbol,
-        "bias": bias,
+        "bias": "LONG",  # пока только long, как у тебя в логике
         "impulse_high": candles[-1].high,
         "impulse_low": candles[-1].low,
-        "atr": atr_now
+        "atr": atr
     }
