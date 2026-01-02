@@ -80,5 +80,35 @@ def fetch_tickers(self):
             "low": float(item["lowPrice"]),
             "last": float(item["lastPrice"]),
         }
+def fetch_tickers(self):
+        """
+        Получаем 24h статистику по всем USDT фьючерсам Binance
+        """
+        url = f"{self.base_url}/fapi/v1/ticker/24hr"
 
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+        except requests.RequestException:
+            return {}
+
+        data = r.json()
+        tickers = {}
+
+        for item in data:
+            symbol = item.get("symbol")
+            if not symbol:
+                continue
+
+            try:
+                tickers[symbol] = {
+                    "quoteVolume": float(item.get("quoteVolume", 0)),
+                    "high": float(item.get("highPrice", 0)),
+                    "low": float(item.get("lowPrice", 0)),
+                    "last": float(item.get("lastPrice", 0)),
+                }
+            except (TypeError, ValueError):
+                continue
+
+        return tickers
     return tickers
