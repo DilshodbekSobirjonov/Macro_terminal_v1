@@ -18,6 +18,8 @@ from trades.monitor import monitor_trade
 
 from core.regime import market_regime
 
+from config.symbols import SYMBOLS
+
 # ================= LOAD ENV =================
 
 load_dotenv()
@@ -123,7 +125,7 @@ def run_cycle():
     telegram.send_admin(
         f"🧠 <b>MacroTerminal heartbeat</b>\n\n"
         f"Time: {cycle_time}\n"
-        f"Analyzed: {', '.join(analyzed)}\n"
+        f"Analyzed symbols: {len(analyzed)}\n"
         f"Signals this cycle: {signals}\n"
         f"Active trades: {len(active_trades)}"
     )
