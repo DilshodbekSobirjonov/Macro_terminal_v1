@@ -3,87 +3,84 @@
 import requests
 import time
 
-BINANCE_FUTURES_URL = "https://fapi.binance.com"
-
 
 class ExchangeService:
     def __init__(self):
-        self.base_url = BINANCE_FUTURES_URL
+        # Binance Futures API
+        self.base_url = "https://fapi.binance.com"
 
-    def fetch_ohlcv(self, symbol, interval="30m", limit=200):
-        """
-        Получает OHLCV свечи с Binance Futures
-        """
-        url = self.base_url + "/fapi/v1/klines"
+    # --------------------------------------------------
+    # OHLCV (candles)
+    # --------------------------------------------------
+    def fetch_ohlcv(self, symbol, timeframe, limit=200):
+        url = f"{self.base_url}/fapi/v1/klines"
 
         params = {
-            "symbol": symbol.replace("/", ""),
-            "interval": interval,
+            "symbol": symbol,
+            "interval": timeframe,
             "limit": limit
         }
 
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        try:
+            r = requests.get(url, params=params, timeout=10)
+            r.raise_for_status()
+        except requests.RequestException:
+            return []
 
         data = r.json()
 
         candles = []
         for c in data:
             candles.append([
-                int(c[0]),        # open time (ms)
-                float(c[1]),      # open
-                float(c[2]),      # high
-                float(c[3]),      # low
-                float(c[4]),      # close
-                float(c[5])       # volume
+                int(c[0]),          # timestamp
+                float(c[1]),        # open
+                float(c[2]),        # high
+                float(c[3]),        # low
+                float(c[4]),        # close
+                float(c[5])         # volume
             ])
 
         return candles
 
-    def fetch_open_interest_history(self, symbol, interval="30m", limit=200):
+    # --------------------------------------------------
+    # OPEN INTEREST HISTORY
+    # --------------------------------------------------
+    def fetch_open_interest_history(self, symbol, timeframe, limit=200):
         """
-        Получает историю Open Interest (по таймфрейму)
+        Binance даёт OI по времени, но не по интервалу свечи,
+        поэтому мы просто мапим timestamp -> OI
         """
-        url = self.base_url + "/futures/data/openInterestHist"
+        url = f"{self.base_url}/futures/data/openInterestHist"
 
         params = {
-            "symbol": symbol.replace("/", ""),
-            "period": interval,
+            "symbol": symbol,
+            "period": timeframe,
             "limit": limit
         }
 
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        try:
+            r = requests.get(url, params=params, timeout=10)
+            r.raise_for_status()
+        except requests.RequestException:
+            return {}
 
         data = r.json()
-
         oi_series = {}
+
         for item in data:
-            oi_series[int(item["timestamp"])] = float(item["sumOpenInterest"])
+            try:
+                ts = int(item["timestamp"])
+                oi = float(item["sumOpenInterest"])
+                oi_series[ts] = oi
+            except (KeyError, TypeError, ValueError):
+                continue
 
         return oi_series
 
-    def now(self):
-        return int(time.time() * 1000)
-def fetch_tickers(self):
-    url = f"{self.base_url}/fapi/v1/ticker/24hr"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-
-    data = r.json()
-    tickers = {}
-
-    for item in data:
-        tickers[item["symbol"]] = {
-            "quoteVolume": float(item["quoteVolume"]),
-            "high": float(item["highPrice"]),
-            "low": float(item["lowPrice"]),
-            "last": float(item["lastPrice"]),
-        }
-def fetch_tickers(self):
-        """
-        Получаем 24h статистику по всем USDT фьючерсам Binance
-        """
+    # --------------------------------------------------
+    # 24H TICKERS (for dynamic universe)
+    # --------------------------------------------------
+    def fetch_tickers(self):
         url = f"{self.base_url}/fapi/v1/ticker/24hr"
 
         try:
@@ -111,4 +108,3 @@ def fetch_tickers(self):
                 continue
 
         return tickers
-    return tickers
