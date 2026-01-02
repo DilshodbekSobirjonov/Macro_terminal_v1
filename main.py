@@ -70,7 +70,7 @@ def run_market_cycle():
     btc_candles = CandleFrame(btc_ohlcv)
     current_regime = market_regime(btc_candles.candles)
 
-    for symbol in SYMBOLS:
+    for symbol in symbols:
         # --- DATA ---
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
         oi_series = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
