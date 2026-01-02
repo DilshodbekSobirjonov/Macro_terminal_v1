@@ -57,3 +57,24 @@ def atr_regime(candles: List[Candle], lookback: int = 20):
         return "expansion"
 
     return "overheated"
+def volume_anomaly(candles, lookback: int = 20, multiplier: float = 1.5):
+    """
+    Проверяет, есть ли аномальный объём на последней закрытой свече
+    """
+    if len(candles) < lookback + 1:
+        return False
+
+    volumes = [c.volume for c in candles[-lookback-1:-1]]
+    avg_volume = sum(volumes) / len(volumes)
+
+    last_volume = candles[-1].volume
+
+    return last_volume > avg_volume * multiplier
+
+
+def oi_delta_positive(candles):
+    """
+    Проверяет, растёт ли OI на последней свече
+    """
+    last = candles[-1]
+    return last.oi_delta is not None and last.oi_delta > 0
