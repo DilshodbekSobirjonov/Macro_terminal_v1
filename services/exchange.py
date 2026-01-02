@@ -54,9 +54,10 @@ class ExchangeService:
         return int(time.time() * 1000)
         def fetch_open_interest_history(self, symbol, interval="30m", limit=100):
     """
-    Получает историю OI (approx) через klines timestamps
+    Получает историю Open Interest с Binance Futures
     """
     url = BINANCE_FUTURES_URL + "/futures/data/openInterestHist"
+
     params = {
         "symbol": symbol.replace("/", ""),
         "period": interval,
