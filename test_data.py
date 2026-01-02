@@ -1,19 +1,10 @@
-from services.telegram import TelegramService
-from trades.trade import Trade
+from services.exchange import ExchangeService
+from core.candles import CandleFrame
+from core.regime import market_regime
 
-tg = TelegramService(
-    token="8543769576:AAGmG7nQjuezf5OqHqzAWlZI1GJsP3b_Gyw",
-    chat_id="-1003534899420"
-)
+exchange = ExchangeService()
 
-trade = Trade(
-    pair="BTCUSDT",
-    direction="LONG",
-    entry_price=88899,
-    score=5,
-    reasons=["CHoCH", "Volume spike", "OI increasing"],
-    tp_levels=[3, 6, 10],
-    sl_percent=4.5
-)
+ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=250)
+candles = CandleFrame(ohlcv)
 
-tg.send("🔥 TEST MESSAGE")
+print("MARKET REGIME:", market_regime(candles.candles))
