@@ -20,9 +20,13 @@ SYMBOLS = [
 
 TIMEFRAME = "30m"
 
-TELEGRAM_TOKEN = "PASTE_YOUR_BOT_TOKEN"
-TELEGRAM_CHAT = "@YOUR_CHANNEL_OR_ID"
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 MIN_SCORE = 5
 
 # ==========================================
