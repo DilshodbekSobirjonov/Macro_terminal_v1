@@ -1,20 +1,21 @@
 # backtest/run_backtest.py
 
-import sys
-import os
-
-# добавляем корень проекта
-sys.path.append(
-    os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..")
-    )
-)
+import time
+from datetime import datetime
 
 from services.exchange import ExchangeService
 from core.candles import CandleFrame
-from core.scoring import calculate_score
 
-# ================= CONFIG =================
+from signals.generator import generate_signal
+from signals.validator import validate_entry
+from trades.trade import calc_sl_tp
+
+# =========================================================
+# CONFIG
+# =========================================================
+
+TIMEFRAME = "30m"
+START_BALANCE = 10000.0
 
 SYMBOLS = [
     "SOLUSDT",
@@ -24,119 +25,152 @@ SYMBOLS = [
     "MATICUSDT"
 ]
 
-TIMEFRAME = "30m"
-LIMIT = 1500
+COMMISSION = 0.0004   # 0.04%
+SLIPPAGE = 0.0005     # 0.05%
 
-MIN_SCORE = 4
-TP_PERCENT = 6.0
-SL_PERCENT = 4.5
-COOLDOWN_CANDLES = 20
-
-# ========================================
+# =========================================================
+# SERVICES
+# =========================================================
 
 exchange = ExchangeService()
 
+# =========================================================
+# BACKTEST CORE
+# =========================================================
 
-def run_symbol(symbol):
-    ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=LIMIT)
-    oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=LIMIT)
+class SimTrade:
+    def __init__(self, symbol, side, entry, sl, tp):
+        self.symbol = symbol
+        self.side = side
+        self.entry = entry
+        self.sl = sl
+        self.tp = tp
+        self.closed = False
+        self.result = 0.0
+
+
+def simulate_trade(trade, candles):
+    """
+    Candle-by-candle simulation AFTER entry candle
+    """
+    for c in candles:
+        if trade.side == "LONG":
+            if c.low <= trade.sl:
+                trade.result = (trade.sl - trade.entry) / trade.entry * 100
+                trade.closed = True
+                return
+            if c.high >= trade.tp:
+                trade.result = (trade.tp - trade.entry) / trade.entry * 100
+                trade.closed = True
+                return
+        else:
+            if c.high >= trade.sl:
+                trade.result = (trade.entry - trade.sl) / trade.entry * 100
+                trade.closed = True
+                return
+            if c.low <= trade.tp:
+                trade.result = (trade.entry - trade.tp) / trade.entry * 100
+                trade.closed = True
+                return
+
+    # time exit (no hit)
+    last = candles[-1].close
+    if trade.side == "LONG":
+        trade.result = (last - trade.entry) / trade.entry * 100
+    else:
+        trade.result = (trade.entry - last) / trade.entry * 100
+
+    trade.closed = True
+
+
+# =========================================================
+# RUN BACKTEST
+# =========================================================
+
+print("\nRunning MULTI backtest")
+print(f"Timeframe: {TIMEFRAME}")
+print("Symbols:", ", ".join(SYMBOLS))
+print("-----\n")
+
+total_trades = []
+balance = START_BALANCE
+
+for symbol in SYMBOLS:
+    ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=1500)
+    oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=1500)
 
     if not ohlcv:
-        return []
+        print(f"{symbol}: no data")
+        continue
 
     candles = CandleFrame(ohlcv, oi).candles
 
     trades = []
-    active_trade = None
-    last_exit_index = -1000
-    pending_signal = None
+    i = 50  # start after warmup
 
-    for i in range(50, len(candles)):
-        window = candles[:i]
-        last = window[-1]
+    while i < len(candles) - 20:
+        # 🔹 IMPULSE DETECTION
+        impulse = generate_signal(symbol)
+        if not impulse:
+            i += 1
+            continue
 
-        score, _ = calculate_score(window)
+        # 🔹 ENTRY CONFIRMATION
+        entry_price = validate_entry(impulse)
+        if not entry_price:
+            i += 1
+            continue
 
-        # SIGNAL
-        if (
-            pending_signal is None
-            and active_trade is None
-            and score >= MIN_SCORE
-            and i - last_exit_index > COOLDOWN_CANDLES
-        ):
-            pending_signal = {
-                "high": last.high,
-                "index": i
-            }
+        # 🔹 SL / TP
+        sl, tp = calc_sl_tp(entry_price, impulse)
 
-        # CONFIRMATION ENTRY
-        if pending_signal is not None and active_trade is None:
-            if last.close > pending_signal["high"]:
-                entry = last.close
-                sl = entry * (1 - SL_PERCENT / 100)
-                tp = entry * (1 + TP_PERCENT / 100)
+        # slippage + commission
+        entry_price *= (1 + SLIPPAGE if impulse["bias"] == "LONG" else 1 - SLIPPAGE)
 
-                active_trade = {
-                    "sl": sl,
-                    "tp": tp
-                }
-                pending_signal = None
+        trade = SimTrade(
+            symbol=symbol,
+            side=impulse["bias"],
+            entry=entry_price,
+            sl=sl,
+            tp=tp
+        )
 
-            elif i - pending_signal["index"] > 5:
-                pending_signal = None
+        simulate_trade(trade, candles[i + 1:i + 30])
 
-        # EXIT
-        if active_trade is not None:
-            if last.low <= active_trade["sl"]:
-                trades.append(-SL_PERCENT)
-                last_exit_index = i
-                active_trade = None
+        # commission
+        trade.result -= COMMISSION * 100 * 2
+        trades.append(trade)
+        total_trades.append(trade)
 
-            elif last.high >= active_trade["tp"]:
-                trades.append(TP_PERCENT)
-                last_exit_index = i
-                active_trade = None
+        i += 10  # cooldown
 
-    return trades
+    # ===== SYMBOL STATS =====
+    if trades:
+        wins = [t for t in trades if t.result > 0]
+        winrate = len(wins) / len(trades) * 100
+        avg = sum(t.result for t in trades) / len(trades)
 
-
-def run():
-    print("Running MULTI backtest")
-    print("Timeframe:", TIMEFRAME)
-    print("Symbols:", ", ".join(SYMBOLS))
-    print("-" * 40)
-
-    all_trades = []
-
-    for symbol in SYMBOLS:
-        trades = run_symbol(symbol)
-        all_trades.extend(trades)
-
-        if trades:
-            wins = [t for t in trades if t > 0]
-            avg = sum(trades) / len(trades)
-
-            print(
-                f"{symbol}: trades={len(trades)} | "
-                f"winrate={round(len(wins)/len(trades)*100,2)}% | "
-                f"avg={round(avg,2)}%"
-            )
-        else:
-            print(f"{symbol}: no trades")
-
-    print("\n===== TOTAL RESULT =====")
-    print("Total trades:", len(all_trades))
-
-    if all_trades:
-        wins = [t for t in all_trades if t > 0]
-
-        print("Total winrate:", round(len(wins)/len(all_trades)*100, 2), "%")
-        print("Total avg:", round(sum(all_trades)/len(all_trades), 2), "%")
-        print("Best:", max(all_trades), "%")
-        print("Worst:", min(all_trades), "%")
+        print(
+            f"{symbol}: trades={len(trades)} | "
+            f"winrate={winrate:.2f}% | avg={avg:.2f}%"
+        )
     else:
-        print("No trades at all")
+        print(f"{symbol}: no trades")
 
+print("\n=====")
+print("===== TOTAL RESULT\n")
 
-if __name__ == "__main__":
-    run()
+if total_trades:
+    wins = [t for t in total_trades if t.result > 0]
+    winrate = len(wins) / len(total_trades) * 100
+    avg = sum(t.result for t in total_trades) / len(total_trades)
+    best = max(t.result for t in total_trades)
+    worst = min(t.result for t in total_trades)
+
+    print(f"Total trades: {len(total_trades)}")
+    print(f"Total winrate: {winrate:.2f} %")
+    print(f"Total avg: {avg:.2f} %")
+    print(f"Best: {best:.2f}%")
+    print(f"Worst: {worst:.2f}%")
+else:
+    print("No trades executed")
