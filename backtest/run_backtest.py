@@ -16,7 +16,7 @@ from trades.monitor import monitor_trade
 SYMBOL = "BTCUSDT"
 TIMEFRAME = "30m"
 LIMIT = 3000          # ~60 дней для 30m
-MIN_SCORE = 5
+MIN_SCORE = 3
 
 exchange = ExchangeService()
 
@@ -43,7 +43,7 @@ def run():
         # ENTRY
         if (
             not active_trade
-            and regime == "RISK_ON"
+           # and regime == "RISK_ON"
             and score >= MIN_SCORE
             and structure.detect_choch()
         ):
