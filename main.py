@@ -16,6 +16,8 @@ from core.structure import MarketStructure
 from trades.trade import Trade
 from trades.monitor import monitor_trade
 
+from core.regime import market_regime
+
 # ================= LOAD ENV =================
 
 load_dotenv()
