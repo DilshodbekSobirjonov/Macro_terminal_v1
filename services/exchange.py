@@ -65,3 +65,20 @@ class ExchangeService:
 
     def now(self):
         return int(time.time() * 1000)
+def fetch_tickers(self):
+    url = f"{self.base_url}/fapi/v1/ticker/24hr"
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+
+    data = r.json()
+    tickers = {}
+
+    for item in data:
+        tickers[item["symbol"]] = {
+            "quoteVolume": float(item["quoteVolume"]),
+            "high": float(item["highPrice"]),
+            "low": float(item["lowPrice"]),
+            "last": float(item["lastPrice"]),
+        }
+
+    return tickers
