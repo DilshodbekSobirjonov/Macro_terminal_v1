@@ -45,11 +45,15 @@ active_trades = db.load_active_trades()
 
 # ==========================================
 
-
 def run_cycle():
     global active_trades
 
     cycle_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # 🌍 MARKET REGIME — ВНУТРИ ЦИКЛА
+    btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=250)
+    btc_candles = CandleFrame(btc_ohlcv)
+    regime = market_regime(btc_candles.candles)
 
     analyzed = []
     signals = 0
@@ -61,6 +65,8 @@ def run_cycle():
         candles = CandleFrame(ohlcv, oi_series)
 
         analyzed.append(symbol)
+
+        # дальше логика scoring / entry / monitoring
 
         # 2️⃣ SCORING
         score, reasons = calculate_score(candles.candles)
