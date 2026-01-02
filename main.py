@@ -81,8 +81,8 @@ def run_market_cycle():
     analyzed = 0
     entries = 0
 
-    # -------- BTC REGIME (HTF CONTEXT) --------
-    btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=250)
+    # -------- BTC REGIME (GLOBAL CONTEXT) --------
+    btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=300)
     btc_candles = CandleFrame(btc_ohlcv)
     current_regime = market_regime(btc_candles.candles)
 
@@ -90,6 +90,7 @@ def run_market_cycle():
     tickers = exchange.fetch_tickers()
     symbols = filter_symbols(tickers)
 
+    # -------- ENTRY LOGIC --------
     for symbol in symbols:
         analyzed += 1
 
@@ -97,35 +98,35 @@ def run_market_cycle():
         if any(t.pair == symbol and t.state == "ACTIVE" for t in active_trades):
             continue
 
-        # only trade risk-on
-        if current_regime != "RISK_ON":
+        # regime filter
+        if current_regime == "RISK_OFF":
             continue
+
+        is_neutral = current_regime == "NEUTRAL"
 
         # -------- LOAD DATA --------
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
-        oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
-
         if not ohlcv:
             continue
 
-        candles = CandleFrame(ohlcv, oi)
+        candles = CandleFrame(ohlcv)
 
-        # -------- NEW STRATEGY FLOW --------
+        # -------- STRATEGY --------
 
-        # 1️⃣ Impulse detection (HTF + BOS + Volume + OI)
         impulse = generate_signal(symbol)
         if not impulse:
             continue
 
-        # 2️⃣ Pullback + SMC confirmation
+        # в NEUTRAL — только самые сильные импульсы
+        if is_neutral and impulse.get("strength", 1) < 2:
+            continue
+
         entry_price = validate_entry(impulse)
         if not entry_price:
             continue
 
-        # 3️⃣ Risk management (ATR-based)
         sl, tp = calc_sl_tp(entry_price, impulse)
 
-        # 4️⃣ Open trade
         trade = open_trade(
             symbol=symbol,
             side=impulse["bias"],
@@ -146,27 +147,33 @@ def run_market_cycle():
             f"Side: {impulse['bias']}\n"
             f"Entry: {entry_price}\n"
             f"SL: {sl:.4f}\n"
-            f"TP: {tp:.4f}"
+            f"TP: {tp:.4f}\n"
+            f"Regime: {current_regime}"
         )
 
-        # -------- MONITOR EXISTING TRADES --------
-        for trade in active_trades[:]:
-            event = monitor_trade(trade, candles.candles)
+    # -------- MONITOR TRADES (SEPARATE LOOP) --------
+    for trade in active_trades[:]:
+        ohlcv = exchange.fetch_ohlcv(trade.pair, TIMEFRAME, limit=50)
+        if not ohlcv:
+            continue
 
-            if event and trade.state == "CLOSED":
-                db.close_trade(trade)
-                active_trades.remove(trade)
+        candles = CandleFrame(ohlcv).candles
+        event = monitor_trade(trade, candles)
 
-                logger.info(
-                    f"CLOSED {trade.pair} pnl={trade.current_profit:.2f}"
-                )
+        if event and trade.state == "CLOSED":
+            db.close_trade(trade)
+            active_trades.remove(trade)
 
-                telegram.send_channel(
-                    f"❌ <b>CLOSED</b>\n\n"
-                    f"{trade.pair}\n"
-                    f"Result: {trade.current_profit:.2f}%\n"
-                    f"Reason: {trade.closed_reason}"
-                )
+            logger.info(
+                f"CLOSED {trade.pair} pnl={trade.current_profit:.2f}"
+            )
+
+            telegram.send_channel(
+                f"❌ <b>CLOSED</b>\n\n"
+                f"{trade.pair}\n"
+                f"Result: {trade.current_profit:.2f}%\n"
+                f"Reason: {trade.closed_reason}"
+            )
 
     # -------- HEARTBEAT --------
     telegram.send_admin(
