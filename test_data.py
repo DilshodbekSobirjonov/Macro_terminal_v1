@@ -3,12 +3,11 @@ from core.candles import CandleFrame
 
 exchange = ExchangeService()
 
-symbol = "BTC/USDT"
+symbol = "BTCUSDT"   # ВАЖНО: без /
 tf = "30m"
 
 ohlcv = exchange.fetch_ohlcv(symbol, tf, limit=100)
 
-# Пока без OI
 candles = CandleFrame(ohlcv)
 
 last = candles.last_closed()
