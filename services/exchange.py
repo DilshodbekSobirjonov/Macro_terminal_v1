@@ -1,40 +1,49 @@
 # services/exchange.py
 
-import ccxt
+import requests
 import time
+
+BINANCE_FUTURES_URL = "https://fapi.binance.com"
 
 
 class ExchangeService:
-    def __init__(self, name="binance"):
-        if name == "binance":
-            self.exchange = ccxt.binance({
-                "enableRateLimit": True,
-                "options": {
-                    "defaultType": "future"  # для OI
-                }
-            })
-        else:
-            raise ValueError("Exchange not supported")
+    def init(self):
+        self.base_url = BINANCE_FUTURES_URL
 
-    def fetch_ohlcv(self, symbol, timeframe, limit=200):
+    def fetch_ohlcv(self, symbol, interval="30m", limit=200):
         """
-        Возвращает OHLCV свечи
+        Fetch OHLCV candles from Binance Futures
         """
-        return self.exchange.fetch_ohlcv(
-            symbol=symbol,
-            timeframe=timeframe,
-            limit=limit
-        )
+        url = f"{self.base_url}/fapi/v1/klines"
+        params = {
+            "symbol": symbol.replace("/", ""),
+            "interval": interval,
+            "limit": limit
+        }
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+
+        data = r.json()
+
+        # Приводим к формату ccxt-like
+        candles = []
+        for c in data:
+            candles.append([
+                c[0],           # open time
+                float(c[1]),    # open
+                float(c[2]),    # high
+                float(c[3]),    # low
+                float(c[4]),    # close
+                float(c[5])     # volume
+            ])
+        return candles
 
     def fetch_open_interest(self, symbol):
-        """
-        Возвращает текущее Open Interest
-        """
-        try:
-            oi = self.exchange.fetch_open_interest(symbol)
-            return oi["openInterest"]
-        except Exception:
-            return None
+        url = f"{self.base_url}/fapi/v1/openInterest"
+        params = {"symbol": symbol.replace("/", "")}
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        return float(r.json()["openInterest"])
 
     def now(self):
         return int(time.time() * 1000)
