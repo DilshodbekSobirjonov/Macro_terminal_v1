@@ -1,8 +1,13 @@
 # trades/exits.py
 
-def calculate_tp(entry_price):
-    return [3, 6, 10]
+def calc_sl_tp(entry_price, impulse):
+    """
+    ATR-based SL / TP
+    """
+    atr = impulse["atr"]
 
+    # LONG only (как сейчас в стратегии)
+    sl = impulse["impulse_low"] - atr * 0.6
+    tp = entry_price + (entry_price - sl) * 2
 
-def calculate_sl():
-    return 4.5
+    return sl, tp
