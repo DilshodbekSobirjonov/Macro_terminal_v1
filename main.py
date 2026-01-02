@@ -240,9 +240,19 @@ def command_loop():
 
 def watchdog_loop():
     while True:
+        # 🛡 grace period — 90 минут после старта
+        if time.time() - BOT_START_TIME < 90 * 60:
+            time.sleep(60)
+            continue
+
         if time.time() - last_market_tick > WATCHDOG_TIMEOUT:
-            telegram.send_admin("🛑 WATCHDOG: market loop stalled. Restart bot.")
-            os._exit(1)
+            telegram.send_admin("🛑 WATCHDOG: restarting bot")
+
+            python = sys.executable
+            subprocess.Popen([python] + sys.argv)
+
+            os._exit(0)
+
         time.sleep(60)
 
 # =========================================================
