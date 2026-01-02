@@ -20,6 +20,8 @@ from core.regime import market_regime
 
 from config.symbols import SYMBOLS
 
+from services.commands import handle_command
+
 # ================= LOAD ENV =================
 
 load_dotenv()
@@ -67,6 +69,19 @@ def run_cycle():
         candles = CandleFrame(ohlcv, oi_series)
 
         analyzed.append(symbol)
+
+# 📥 TELEGRAM COMMANDS (admin only)
+    state = {
+        "regime": regime,
+        "active_trades": active_trades,
+        "last_heartbeat": cycle_time
+    }
+
+    commands = telegram.fetch_commands()
+    for cmd in commands:
+        reply = handle_command(cmd, state)
+        if reply:
+            telegram.send_admin(reply)
 
         # дальше логика scoring / entry / monitoring
 
