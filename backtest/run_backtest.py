@@ -3,7 +3,7 @@
 import sys
 import os
 
-# добавляем корень проекта
+# добавляем корень проекта в PYTHONPATH
 sys.path.append(
     os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..")
@@ -16,7 +16,7 @@ from core.scoring import calculate_score
 
 # ================= CONFIG =================
 
-SYMBOL = "SOLUSDT"      # BTCUSDT | SOLUSDT | INJUSDT | OPUSDT
+SYMBOL = "SOLUSDT"     # попробуй также INJUSDT, OPUSDT
 TIMEFRAME = "30m"
 LIMIT = 1500
 
@@ -24,7 +24,7 @@ MIN_SCORE = 4
 TP_PERCENT = 6.0
 SL_PERCENT = 4.5
 
-COOLDOWN_CANDLES = 20   # запрет повторного входа
+COOLDOWN_CANDLES = 20   # запрет повторного входа после выхода
 
 # ========================================
 
@@ -60,29 +60,47 @@ def run():
     active_trade = None
     last_exit_index = -1000
 
+    # для confirmation entry
+    pending_signal = None  # {"high": float, "index": int}
+
     for i in range(50, len(candles)):
         window = candles[:i]
         last = window[-1]
 
         score, reasons = calculate_score(window)
 
-        # ---------- ENTRY ----------
+        # ---------- SIGNAL (NO ENTRY YET) ----------
         if (
-            active_trade is None
+            pending_signal is None
+            and active_trade is None
             and score >= MIN_SCORE
             and i - last_exit_index > COOLDOWN_CANDLES
         ):
-            entry_price = last.close
-
-            sl_price = entry_price * (1 - SL_PERCENT / 100)
-            tp_price = entry_price * (1 + TP_PERCENT / 100)
-
-            active_trade = {
-                "entry": entry_price,
-                "sl": sl_price,
-                "tp": tp_price,
-                "open_index": i
+            pending_signal = {
+                "high": last.high,
+                "index": i
             }
+
+        # ---------- CONFIRMATION ENTRY ----------
+        if pending_signal is not None and active_trade is None:
+            # подтверждение: закрытие выше high сигнальной свечи
+            if last.close > pending_signal["high"]:
+                entry_price = last.close
+                sl_price = entry_price * (1 - SL_PERCENT / 100)
+                tp_price = entry_price * (1 + TP_PERCENT / 100)
+
+                active_trade = {
+                    "entry": entry_price,
+                    "sl": sl_price,
+                    "tp": tp_price,
+                    "open_index": i
+                }
+
+                pending_signal = None
+
+            # отмена сигнала, если слишком долго
+            elif i - pending_signal["index"] > 5:
+                pending_signal = None
 
         # ---------- EXIT ----------
         if active_trade is not None:
