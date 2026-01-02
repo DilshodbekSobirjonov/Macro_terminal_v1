@@ -1,9 +1,8 @@
 # signals/validator.py
 
 from services.exchange import ExchangeService
-from core.indicators import EMA
-from core.structure import detect_choch
 from core.candles import CandleFrame
+from core.structure import detect_choch
 
 exchange = ExchangeService()
 
@@ -21,15 +20,12 @@ def validate_entry(impulse):
     FINAL ENTRY CONFIRMATION
     """
     symbol = impulse["symbol"]
-    bias = impulse["bias"]
 
     ohlcv = exchange.fetch_ohlcv(symbol, LOW_TF, limit=60)
     if not ohlcv:
         return None
 
     candles = CandleFrame(ohlcv).candles
-    ema20 = EMA(candles, 20)
-
     last = candles[-1]
 
     # 1️⃣ Pullback
@@ -41,20 +37,13 @@ def validate_entry(impulse):
         return None
 
     # 2️⃣ CHoCH
-    if not detect_choch(candles, bias):
+    if not detect_choch(candles):
         return None
 
     # 3️⃣ Rejection candle
     body = abs(last.close - last.open)
     rng = last.high - last.low
-
     if rng == 0 or body / rng < 0.4:
-        return None
-
-    # 4️⃣ EMA alignment
-    if bias == "LONG" and last.close < ema20[-1]:
-        return None
-    if bias == "SHORT" and last.close > ema20[-1]:
         return None
 
     return last.close
