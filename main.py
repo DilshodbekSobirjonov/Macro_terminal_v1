@@ -21,6 +21,7 @@ from trades.trade import Trade
 from trades.monitor import monitor_trade
 
 from config.symbols import SYMBOLS
+from core.universe import filter_symbols
 
 # ================= LOAD ENV =================
 
