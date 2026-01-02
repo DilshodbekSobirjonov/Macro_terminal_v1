@@ -1,9 +1,13 @@
 # main.py
 
 import time
-from services.db import Database
+import os
+from datetime import datetime
+from dotenv import load_dotenv
+
 from services.exchange import ExchangeService
 from services.telegram import TelegramService
+from services.db import Database
 
 from core.candles import CandleFrame
 from core.scoring import calculate_score
@@ -12,50 +16,61 @@ from core.structure import MarketStructure
 from trades.trade import Trade
 from trades.monitor import monitor_trade
 
-# ================= CONFIG =================
-
-SYMBOLS = [
-    "BTCUSDT",
-    # позже добавим альты
-]
-
-TIMEFRAME = "30m"
-
-from dotenv import load_dotenv
-import os
+# ================= LOAD ENV =================
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID")
+TG_TOKEN = os.getenv("TG_TOKEN")
+TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+
+if not TG_TOKEN or not TG_CHANNEL_ID or not ADMIN_CHAT_ID:
+    raise RuntimeError("Telegram ENV variables not set")
+
+# ================= CONFIG =================
+
+SYMBOLS = ["BTCUSDT"]
+TIMEFRAME = "30m"
 MIN_SCORE = 5
 
 # ==========================================
 
 exchange = ExchangeService()
-telegram = TelegramService(TELEGRAM_TOKEN, TELEGRAM_CHAT)
+telegram = TelegramService(TG_TOKEN, TG_CHANNEL_ID, ADMIN_CHAT_ID)
+db = Database()
 
-active_trades = []
+active_trades = db.load_active_trades()
+
+# ==========================================
 
 
 def run_cycle():
     global active_trades
 
+    cycle_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    analyzed = []
+    signals = 0
+
     for symbol in SYMBOLS:
         # 1️⃣ DATA
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
         oi_series = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
-
         candles = CandleFrame(ohlcv, oi_series)
+
+        analyzed.append(symbol)
 
         # 2️⃣ SCORING
         score, reasons = calculate_score(candles.candles)
-
         structure = MarketStructure(candles.candles)
 
         # 3️⃣ ENTRY LOGIC
-        if score >= MIN_SCORE and structure.detect_choch():
-            entry_price = candles.candles[-1].close
+        if (
+            score >= MIN_SCORE
+            and structure.detect_choch()
+            and not any(t.pair == symbol and t.state == "ACTIVE" for t in active_trades)
+        ):
+            entry_price = candles.candles[-2].close
 
             trade = Trade(
                 pair=symbol,
@@ -68,12 +83,14 @@ def run_cycle():
             )
 
             active_trades.append(trade)
+            db.save_trade(trade)
+            signals += 1
 
-            telegram.send(
-                f"🟢 SIGNAL\n\n"
-                f"{symbol}\n"
-                f"ENTRY: {entry_price}\n"
-                f"SCORE: {score}\n\n"
+            telegram.send_channel(
+                f"🟢 <b>SIGNAL</b>\n\n"
+                f"<b>PAIR:</b> {symbol}\n"
+                f"<b>ENTRY:</b> {entry_price}\n"
+                f"<b>SCORE:</b> {score}\n\n"
                 + "\n".join(f"• {r}" for r in reasons)
             )
 
@@ -83,28 +100,36 @@ def run_cycle():
 
             if event:
                 if trade.state == "CLOSED":
-                    telegram.send(
-                        f"❌ CLOSED\n\n"
+                    db.close_trade(trade)
+
+                    telegram.send_channel(
+                        f"❌ <b>CLOSED</b>\n\n"
                         f"{trade.pair}\n"
                         f"Result: {trade.current_profit:.2f}%\n"
                         f"Reason: {trade.closed_reason}"
                     )
-                    active_trades.remove(trade)
-                else:
-                    telegram.send(
-                        f"📈 UPDATE\n\n"
-                        f"{trade.pair}\n"
-                        f"PNL: {trade.current_profit:.2f}%"
-                    )
 
+                    active_trades.remove(trade)
+
+    # 👤 HEARTBEAT В ЛИЧКУ
+    telegram.send_admin(
+        f"🧠 <b>MacroTerminal heartbeat</b>\n\n"
+        f"Time: {cycle_time}\n"
+        f"Analyzed: {', '.join(analyzed)}\n"
+        f"Signals this cycle: {signals}\n"
+        f"Active trades: {len(active_trades)}"
+    )
+
+
+# ==========================================
 
 if __name__ == "__main__":
-    telegram.send("🤖 MacroTerminal started")
+    telegram.send_admin("🤖 MacroTerminal started")
 
     while True:
         try:
             run_cycle()
             time.sleep(30 * 60)  # 30 минут
         except Exception as e:
-            telegram.send(f"⚠️ ERROR:\n{str(e)}")
+            telegram.send_admin(f"⚠️ ERROR:\n{str(e)}")
             time.sleep(60)
