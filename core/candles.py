@@ -5,7 +5,7 @@ from datetime import datetime
 
 
 class Candle:
-    def init(self, timestamp, open_, high, low, close, volume):
+    def __init__(self, timestamp, open_, high, low, close, volume):
         self.timestamp = timestamp
         self.time = datetime.fromtimestamp(timestamp / 1000)
 
@@ -21,7 +21,7 @@ class Candle:
 
 
 class CandleFrame:
-    def init(self, ohlcv, oi_series=None):
+    def __init__(self, ohlcv, oi_series=None):
         self.candles = self._build(ohlcv, oi_series)
 
     def _build(self, ohlcv, oi_series):
