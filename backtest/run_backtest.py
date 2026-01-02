@@ -99,6 +99,7 @@ total_trades = []
 balance = START_BALANCE
 
 for symbol in SYMBOLS:
+print(f"Fetching data for {symbol}...")
     ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=1500)
     oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=1500)
 
