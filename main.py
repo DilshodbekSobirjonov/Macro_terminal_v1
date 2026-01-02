@@ -137,6 +137,7 @@ def run_market_cycle():
         f"Analyzed symbols: {len(analyzed)}\n"
         f"Signals this cycle: {signals}\n"
         f"Active trades: {len(active_trades)}"
+        f"Universe size: {len(symbols)}\n"
     )
 
 # =========================================================
