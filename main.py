@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+# === SERVICES ===
 from services.exchange import ExchangeService
 from services.telegram import TelegramService
 from services.db import Database
@@ -14,34 +15,18 @@ from services.commands import handle_command
 from services.stats import calculate_stats, daily_range
 from services.logger import setup_logger
 
+# === CORE ===
 from core.candles import CandleFrame
-from core.scoring import calculate_score
-from core.structure import MarketStructure
 from core.regime import market_regime
 from core.universe import filter_symbols
 
-from trades.trade import Trade
+# === TRADES ===
+from trades.trade import open_trade, calc_sl_tp
 from trades.monitor import monitor_trade
 
+# === SIGNALS (NEW STRATEGY) ===
 from signals.generator import generate_signal
 from signals.validator import validate_entry
-from trades.trade import open_trade, calc_sl_tp
-
-impulse = generate_signal(symbol)
-
-if impulse:
-    entry_price = validate_entry(impulse)
-
-    if entry_price:
-        sl, tp = calc_sl_tp(entry_price, impulse)
-
-        open_trade(
-            symbol=symbol,
-            side=impulse["bias"],
-            entry_price=entry_price,
-            stop_loss=sl,
-            take_profit=tp
-        )
 
 # =========================================================
 # ENV
@@ -61,14 +46,13 @@ if not TG_TOKEN or not TG_CHANNEL_ID or not ADMIN_CHAT_ID:
 # =========================================================
 
 TIMEFRAME = "30m"
-MIN_SCORE = 5
 
-MARKET_SLEEP = 30 * 60     # 30 min
-COMMAND_SLEEP = 3          # 3 sec
-WATCHDOG_TIMEOUT = 60 * 60 # 1 hour
+MARKET_SLEEP = 30 * 60      # 30 min
+COMMAND_SLEEP = 3           # 3 sec
+WATCHDOG_TIMEOUT = 60 * 60  # 1 hour
 
 # =========================================================
-# SERVICES
+# SERVICES INIT
 # =========================================================
 
 exchange = ExchangeService()
@@ -94,9 +78,9 @@ def run_market_cycle():
     last_cycle_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     analyzed = 0
-    signals = 0
+    entries = 0
 
-    # -------- BTC REGIME --------
+    # -------- BTC REGIME (HTF CONTEXT) --------
     btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", "4h", limit=250)
     btc_candles = CandleFrame(btc_ohlcv)
     current_regime = market_regime(btc_candles.candles)
@@ -108,7 +92,15 @@ def run_market_cycle():
     for symbol in symbols:
         analyzed += 1
 
-        # --- data ---
+        # skip if already in trade
+        if any(t.pair == symbol and t.state == "ACTIVE" for t in active_trades):
+            continue
+
+        # only trade risk-on
+        if current_regime != "RISK_ON":
+            continue
+
+        # -------- LOAD DATA --------
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
         oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
 
@@ -117,44 +109,46 @@ def run_market_cycle():
 
         candles = CandleFrame(ohlcv, oi)
 
-        # --- scoring ---
-        score, reasons = calculate_score(candles.candles)
-        structure = MarketStructure(candles.candles)
+        # -------- NEW STRATEGY FLOW --------
 
-        # --- entry ---
-        if (
-            current_regime == "RISK_ON"
-            and score >= MIN_SCORE
-            and structure.detect_choch()
-            and not any(t.pair == symbol and t.state == "ACTIVE" for t in active_trades)
-        ):
-            entry = candles.candles[-2].close
+        # 1️⃣ Impulse detection (HTF + BOS + Volume + OI)
+        impulse = generate_signal(symbol)
+        if not impulse:
+            continue
 
-            trade = Trade(
-                pair=symbol,
-                direction="LONG",
-                entry_price=entry,
-                score=score,
-                reasons=reasons,
-                tp_levels=[3, 6, 10],
-                sl_percent=4.5
-            )
+        # 2️⃣ Pullback + SMC confirmation
+        entry_price = validate_entry(impulse)
+        if not entry_price:
+            continue
 
-            active_trades.append(trade)
-            db.save_trade(trade)
-            signals += 1
+        # 3️⃣ Risk management (ATR-based)
+        sl, tp = calc_sl_tp(entry_price, impulse)
 
-            logger.info(f"SIGNAL {symbol} score={score}")
+        # 4️⃣ Open trade
+        trade = open_trade(
+            symbol=symbol,
+            side=impulse["bias"],
+            entry_price=entry_price,
+            stop_loss=sl,
+            take_profit=tp
+        )
 
-            telegram.send_channel(
-                f"🟢 <b>SIGNAL</b>\n\n"
-                f"{symbol}\n"
-                f"ENTRY: {entry}\n"
-                f"SCORE: {score}\n\n"
-                + "\n".join(f"• {r}" for r in reasons)
-            )
+        active_trades.append(trade)
+        db.save_trade(trade)
+        entries += 1
 
-        # --- monitoring ---
+        logger.info(f"ENTRY {symbol} @ {entry_price}")
+
+        telegram.send_channel(
+            f"🟢 <b>ENTRY</b>\n\n"
+            f"{symbol}\n"
+            f"Side: {impulse['bias']}\n"
+            f"Entry: {entry_price}\n"
+            f"SL: {sl:.4f}\n"
+            f"TP: {tp:.4f}"
+        )
+
+        # -------- MONITOR EXISTING TRADES --------
         for trade in active_trades[:]:
             event = monitor_trade(trade, candles.candles)
 
@@ -180,7 +174,7 @@ def run_market_cycle():
         f"Regime: {current_regime}\n"
         f"Universe: {len(symbols)}\n"
         f"Analyzed: {analyzed}\n"
-        f"Signals: {signals}\n"
+        f"Entries: {entries}\n"
         f"Active trades: {len(active_trades)}"
     )
 
