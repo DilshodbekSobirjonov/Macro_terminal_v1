@@ -11,7 +11,7 @@ from core.candles import CandleFrame
 
 from signals.generator import generate_signal
 from signals.validator import validate_entry
-from trades.trade import calc_sl_tp
+from trades.exits import calc_sl_tp
 
 # =========================================================
 # CONFIG
