@@ -1,41 +1,31 @@
- services.telegram import TelegramService
+# main.py
+
+import os
+import time
+import threading
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+# ================= SERVICES =================
+from services.exchange import ExchangeService
+from services.telegram import TelegramService
 from services.db import Database
 from services.commands import handle_command
 from services.stats import calculate_stats, daily_range
 from services.logger import setup_logger
 
-# === CORE ===
+# ================= CORE =================
 from core.candles import CandleFrame
 from core.regime import market_regime
 from core.universe import filter_symbols
 
-# === TRADES ===
-# main.py
+# ================= TRADES =================
+from trades.trade import open_trade
+from trades.exits import calc_sl_tp
+from trades.monitor import monitor_trade
 
-import os
-import time
-import threading
-from datetime import datetime, timezone
-
-from dotenv import load_dotenv
-
-# === SERVICES ===
-from services.exchange import ExchangeService
-from
-# main.py
-
-import os
-import time
-import threading
-from datetime import datetime, timezone
-
-from dotenv import load_dotenv
-
-# === SERVICES ===
-from services.exchange import ExchangeService
-from
-
-# === SIGNALS (NEW STRATEGY) ===
+# ================= SIGNALS =================
 from signals.generator import generate_signal
 from signals.validator import validate_entry
 
