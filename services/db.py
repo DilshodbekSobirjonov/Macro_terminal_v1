@@ -103,3 +103,20 @@ class Database:
             trades.append(trade)
 
         return trades
+# ---------- STATS ----------
+
+    def get_closed_trades(self, since_iso=None):
+        cur = self.conn.cursor()
+
+        if since_iso:
+            cur.execute("""
+            SELECT result FROM trades
+            WHERE state = 'CLOSED' AND close_time >= ?
+            """, (since_iso,))
+        else:
+            cur.execute("""
+            SELECT result FROM trades
+            WHERE state = 'CLOSED'
+            """)
+
+        return [row[0] for row in cur.fetchall()]
