@@ -1,69 +1,129 @@
 # backtest/run_backtest.py
 
 from services.exchange import ExchangeService
+
 from core.candles import CandleFrame
 from core.structure import MarketStructure
-from core.indicators import calculate_atr, atr_regime, volume_anomaly
+from core.indicators import (
+    calculate_atr,
+    atr_regime,
+    volume_anomaly
+)
+from core.regime import market_regime
+
 from trades.exits import calc_sl_tp
 
-# ================= CONFIG =================
+# =========================================================
+# CONFIG
+# =========================================================
 
 TIMEFRAME = "30m"
-SYMBOLS = ["SOLUSDT", "INJUSDT", "OPUSDT", "AVAXUSDT", "MATICUSDT"]
+HTF_TIMEFRAME = "4h"
 
-LOOKBACK = 200
-FUTURE_BARS = 20
-COOLDOWN = 10
+SYMBOLS = [
+    "SOLUSDT",
+    "INJUSDT",
+    "OPUSDT",
+    "AVAXUSDT",
+    "MATICUSDT"
+]
 
-# ================= INIT =================
+LOOKBACK = 300        # сколько свечей грузим
+START_INDEX = 60      # прогрев
+FUTURE_BARS = 20      # сколько баров смотрим вперёд
+COOLDOWN = 10         # пауза между сделками
+
+# =========================================================
+# INIT
+# =========================================================
 
 exchange = ExchangeService()
 
-print("\nRunning SIMPLE backtest (NO OI, NO LIVE LOOPS)")
+print("\nRunning BACKTEST with BTC + HTF filter")
 print(f"Timeframe: {TIMEFRAME}")
 print("Symbols:", ", ".join(SYMBOLS))
-print("-----\n")
+print("------------------------------------------------\n")
+
+# =========================================================
+# BTC CONTEXT (ONCE)
+# =========================================================
+
+print("Fetching BTC context...")
+btc_ohlcv = exchange.fetch_ohlcv("BTCUSDT", HTF_TIMEFRAME, limit=300)
+
+if not btc_ohlcv:
+    raise RuntimeError("BTC data not available")
+
+btc_candles = CandleFrame(btc_ohlcv).candles
+btc_regime = market_regime(btc_candles)
+
+print(f"BTC REGIME: {btc_regime}\n")
+
+# =========================================================
+# BACKTEST
+# =========================================================
 
 total_results = []
 
-# ================= BACKTEST =================
-
 for symbol in SYMBOLS:
     print(f"{symbol}: fetching data...")
-    ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=LOOKBACK)
 
+    ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=LOOKBACK)
     if not ohlcv:
-        print(f"{symbol}: no data")
+        print(f"{symbol}: no data\n")
         continue
 
     candles = CandleFrame(ohlcv).candles
     trades = []
-    i = 50
+
+    i = START_INDEX
 
     while i < len(candles) - FUTURE_BARS:
+
+        # ================= BTC FILTER =================
+        if btc_regime != "RISK_ON":
+            i += 1
+            continue
+
         window = candles[:i]
+
+        # ================= HTF FILTER =================
+        htf_ohlcv = exchange.fetch_ohlcv(symbol, HTF_TIMEFRAME, limit=200)
+        if not htf_ohlcv:
+            i += 1
+            continue
+
+        htf_candles = CandleFrame(htf_ohlcv).candles
+        htf_structure = MarketStructure(htf_candles)
+
+        if not htf_structure.detect_bos():
+            i += 1
+            continue
+
+        # ================= LTF STRUCTURE =================
         structure = MarketStructure(window)
 
-        # 1️⃣ BOS
         if not structure.detect_bos():
             i += 1
             continue
 
-        # 2️⃣ ATR regime
+        # ================= ATR REGIME =================
         if atr_regime(window) != "expansion":
             i += 1
             continue
 
-        # 3️⃣ Volume spike
+        # ================= VOLUME FILTER =================
         if not volume_anomaly(window, multiplier=1.5):
             i += 1
             continue
 
+        # ================= ATR =================
         atr = calculate_atr(window)
         if atr is None:
             i += 1
             continue
 
+        # ================= ENTRY =================
         entry = window[-1].close
         impulse = {
             "impulse_low": window[-1].low,
@@ -72,8 +132,9 @@ for symbol in SYMBOLS:
 
         sl, tp = calc_sl_tp(entry, impulse)
 
-        # ==== SIMULATION ====
+        # ================= SIMULATION =================
         result = None
+
         for c in candles[i + 1:i + FUTURE_BARS]:
             if c.low <= sl:
                 result = (sl - entry) / entry * 100
@@ -83,17 +144,17 @@ for symbol in SYMBOLS:
                 break
 
         if result is None:
-            last = candles[i + FUTURE_BARS].close
-            result = (last - entry) / entry * 100
+            last_close = candles[i + FUTURE_BARS].close
+            result = (last_close - entry) / entry * 100
 
         trades.append(result)
         total_results.append(result)
 
         i += COOLDOWN
 
-    # ===== STATS =====
+    # ================= SYMBOL STATS =================
     if trades:
-        wins = [t for t in trades if t > 0]
+        wins = [r for r in trades if r > 0]
         winrate = len(wins) / len(trades) * 100
         avg = sum(trades) / len(trades)
 
@@ -104,13 +165,17 @@ for symbol in SYMBOLS:
     else:
         print(f"{symbol}: no trades")
 
-# ================= TOTAL =================
+    print()
 
-print("\n=====")
-print("===== TOTAL RESULT\n")
+# =========================================================
+# TOTAL STATS
+# =========================================================
+
+print("================================================")
+print("TOTAL RESULT\n")
 
 if total_results:
-    wins = [t for t in total_results if t > 0]
+    wins = [r for r in total_results if r > 0]
     winrate = len(wins) / len(total_results) * 100
     avg = sum(total_results) / len(total_results)
 
