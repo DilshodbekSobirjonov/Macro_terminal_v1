@@ -30,30 +30,34 @@ class TelegramService:
 
     # 📥 получить команды
     def fetch_commands(self):
-        url = f"{self.base_url}/getUpdates"
-        params = {
-            "offset": self.offset,
-            "timeout": 0
-        }
+    url = f"{self.base_url}/getUpdates"
+    params = {
+        "offset": self.offset,
+        "timeout": 0
+    }
 
-        r = requests.get(url, params=params, timeout=10)
+    try:
+        r = requests.get(url, params=params, timeout=5)
         r.raise_for_status()
+    except requests.RequestException:
+        # сеть недоступна — просто молчим
+        return []
 
-        updates = r.json()["result"]
-        commands = []
+    updates = r.json().get("result", [])
+    commands = []
 
-        for u in updates:
-            self.offset = u["update_id"] + 1
+    for u in updates:
+        self.offset = u["update_id"] + 1
 
-            msg = u.get("message")
-            if not msg:
-                continue
+        msg = u.get("message")
+        if not msg:
+            continue
 
-            if msg["chat"]["id"] != int(self.admin_id):
-                continue
+        if msg["chat"]["id"] != int(self.admin_id):
+            continue
 
-            text = msg.get("text", "")
-            if text.startswith("/"):
-                commands.append(text)
+        text = msg.get("text", "")
+        if text.startswith("/"):
+            commands.append(text)
 
-        return commands
+    return commands
