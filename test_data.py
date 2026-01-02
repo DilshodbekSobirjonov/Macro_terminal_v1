@@ -1,20 +1,18 @@
 from services.exchange import ExchangeService
 from core.candles import CandleFrame
+from core.structure import MarketStructure
 
 exchange = ExchangeService()
 
 symbol = "BTCUSDT"
 tf = "30m"
 
-ohlcv = exchange.fetch_ohlcv(symbol, tf, limit=100)
-
+ohlcv = exchange.fetch_ohlcv(symbol, tf, limit=120)
 candles = CandleFrame(ohlcv)
 
-last = candles.last_closed()
+structure = MarketStructure(candles.candles)
 
-print("TIME:", last.time)
-print("OPEN:", last.open)
-print("HIGH:", last.high)
-print("LOW:", last.low)
-print("CLOSE:", last.close)
-print("VOLUME:", last.volume)
+print("Last swing high:", structure.last_swing_high())
+print("Last swing low:", structure.last_swing_low())
+print("BOS:", structure.detect_bos())
+print("CHoCH:", structure.detect_choch())
