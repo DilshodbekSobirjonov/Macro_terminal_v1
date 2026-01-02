@@ -45,7 +45,7 @@ if not TG_TOKEN or not TG_CHANNEL_ID or not ADMIN_CHAT_ID:
 # =========================================================
 # CONFIG
 # =========================================================
-
+BOT_START_TIME = time.time()
 TIMEFRAME = "30m"
 
 MARKET_SLEEP = 30 * 60      # 30 min
