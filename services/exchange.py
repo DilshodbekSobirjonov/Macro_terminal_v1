@@ -52,3 +52,24 @@ class ExchangeService:
 
     def now(self):
         return int(time.time() * 1000)
+        def fetch_open_interest_history(self, symbol, interval="30m", limit=100):
+    """
+    Получает историю OI (approx) через klines timestamps
+    """
+    url = BINANCE_FUTURES_URL + "/futures/data/openInterestHist"
+    params = {
+        "symbol": symbol.replace("/", ""),
+        "period": interval,
+        "limit": limit
+    }
+
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+
+    data = r.json()
+
+    oi_series = {}
+    for item in data:
+        oi_series[int(item["timestamp"])] = float(item["sumOpenInterest"])
+
+    return oi_series
