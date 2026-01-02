@@ -1,6 +1,7 @@
 # main.py
 
 import time
+from services.db import Database
 from services.exchange import ExchangeService
 from services.telegram import TelegramService
 
