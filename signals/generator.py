@@ -2,18 +2,22 @@
 
 from services.exchange import ExchangeService
 from core.candles import CandleFrame
-from core.structure import detect_strong_bos
-from core.indicators import calculate_atr, volume_anomaly, oi_delta_positive, atr_regime
+from core.structure import MarketStructure
+from core.indicators import (
+    calculate_atr,
+    atr_regime,
+    volume_anomaly,
+    oi_delta_positive
+)
 
 exchange = ExchangeService()
-
 TIMEFRAME = "30m"
 
 
 def generate_signal(symbol):
     """
     IMPULSE DETECTOR
-    Возвращает impulse или None
+    Использует РЕАЛЬНУЮ структуру проекта
     """
     ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200)
     oi = exchange.fetch_open_interest_history(symbol, TIMEFRAME, limit=200)
@@ -21,34 +25,36 @@ def generate_signal(symbol):
     if not ohlcv:
         return None
 
-    candles = CandleFrame(ohlcv, oi).candles
+    candles = CandleFrame(ohlcv, oi)
+    structure = MarketStructure(candles.candles)
 
-    # 1️⃣ Strong BOS
-    if not detect_strong_bos(candles):
+    # 1️⃣ BOS (реальный, из твоего кода)
+    if not structure.detect_bos():
         return None
 
-    # 2️⃣ ATR regime — не перегрето
-    atr_state = atr_regime(candles)
-    if atr_state != "expansion":
+    # 2️⃣ ATR regime — только expansion
+    if atr_regime(candles.candles) != "expansion":
         return None
 
     # 3️⃣ Volume anomaly
-    if not volume_anomaly(candles, multiplier=1.5):
+    if not volume_anomaly(candles.candles, multiplier=1.5):
         return None
 
     # 4️⃣ OI direction
-    if not oi_delta_positive(candles):
+    if not oi_delta_positive(candles.candles):
         return None
 
-    # 5️⃣ ATR value (для SL)
-    atr = calculate_atr(candles)
+    # 5️⃣ ATR value
+    atr = calculate_atr(candles.candles)
     if atr is None:
         return None
 
+    last = candles.candles[-1]
+
     return {
         "symbol": symbol,
-        "bias": "LONG",  # пока только long, как у тебя в логике
-        "impulse_high": candles[-1].high,
-        "impulse_low": candles[-1].low,
+        "bias": "LONG",   # пока LONG only
+        "impulse_high": last.high,
+        "impulse_low": last.low,
         "atr": atr
     }
