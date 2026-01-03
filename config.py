@@ -1,1 +1,32 @@
 
+# config.py
+import time
+
+# ===== BOT LIFECYCLE =====
+BOT_START_TIME = time.time()
+BOOT_GRACE_PERIOD = 90 * 60
+
+# ===== TIMEFRAMES =====
+TIMEFRAME = "30m"
+BTC_TIMEFRAME = "4h"
+
+# ===== LOOPS =====
+MARKET_SLEEP = 30 * 60
+COMMAND_SLEEP = 3
+WATCHDOG_TIMEOUT = 3 * 60 * 60
+
+# ===== REGIME BEHAVIOR =====
+ALLOW_RISK_ON = True
+ALLOW_NEUTRAL = False
+ALLOW_RISK_OFF = False
+
+# ===== STRATEGY =====
+MIN_SCORE = 5
+NEUTRAL_EXTRA_SCORE = 1
+
+# ===== SAFETY =====
+MAX_ACTIVE_TRADES = 1
+MAX_TOTAL_TRADES = 5
+
+# ===== LOGGING =====
+LOG_LEVEL = "INFO"
