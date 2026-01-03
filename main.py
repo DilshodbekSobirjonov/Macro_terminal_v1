@@ -3,6 +3,8 @@
 import os
 import time
 import threading
+import sys
+import subprocess
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -238,10 +240,9 @@ def command_loop():
         except Exception:
             time.sleep(5)
 
-
 def watchdog_loop():
     while True:
-        # 🛡 grace period — 90 минут после старта
+        # grace period — 90 минут после старта
         if time.time() - BOT_START_TIME < 90 * 60:
             time.sleep(60)
             continue
