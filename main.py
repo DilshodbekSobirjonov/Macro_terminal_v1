@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # ================= SERVICES =================
+from config import *
 from services.exchange import ExchangeService
 from services.telegram import TelegramService
 from services.db import Database
