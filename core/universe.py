@@ -4,7 +4,7 @@ def filter_symbols(
     tickers,
     min_volume_usd=50_000_000,
     min_atr_percent=0.5,
-    max_symbols=20
+    max_symbols=60
 ):
     """
     tickers: dict from exchange.fetch_tickers()
