@@ -75,3 +75,23 @@ class MarketStructure:
         current_price = self.candles[-1].close
 
         return current_price < swing_candle.low
+def detect_choch_bullish(candles):
+    """
+    Минимальный CHoCH:
+    - было минимум 3 lower highs
+    - текущий high > предыдущего lower high
+    """
+    if len(candles) < 6:
+        return False
+
+    highs = [c.high for c in candles[-6:-1]]
+
+    # 3 подряд lower highs
+    if not (highs[0] > highs[1] > highs[2]):
+        return False
+
+    # CHoCH: текущий high пробивает предыдущий lower high
+    if candles[-1].high > highs[2]:
+        return True
+
+    return False
