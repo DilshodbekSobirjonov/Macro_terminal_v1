@@ -1,4 +1,4 @@
-# main.py
+2# main.py
 
 import os
 import time
@@ -278,8 +278,10 @@ if __name__ == "__main__":
 
 ......
 
+
 import re
 import asyncio
+import random
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 
@@ -292,16 +294,25 @@ API_HASH = "7df215535ba9bc5a9c7bb61102709403"
 
 SESSION_NAME = "trojan_autobuy"
 
-# канал-источник (СПИСОК — важно)
-SOURCE_CHANNEL_ID = [-1003735116794]
+SOURCE_CHANNEL_ID = [
+    -1003735116794,  # основной канал
+    -1003101815766   # тестовый канал
+]
 
-# торговый бот
 TARGET_BOT = "@odysseus_trojanbot"
 
-# задержки
-SEND_DELAY = 0.3        # задержка перед отправкой CA
-BUY_DELAY = 1.0         # через сколько секунд жать BUY
-MAX_WAIT_TIME = 10.0    # максимальное время ожидания ответа бота
+# Более "человеческие" задержки с рандомом
+SEND_DELAY_MIN = 0.5
+SEND_DELAY_MAX = 1.2
+
+BUY_DELAY_MIN = 2.0      # минимум 2 секунды
+BUY_DELAY_MAX = 4.0      # максимум 4 секунды
+
+# Сколько раз пытаться нажать кнопку при редактировании
+MAX_CLICK_ATTEMPTS = 3
+RETRY_DELAY = 1.0        # задержка между попытками
+
+MAX_WAIT_TIME = 20.0
 
 LOG = "[AUTO]"
 
@@ -324,10 +335,13 @@ client = TelegramClient(
     app_version="10.0",
 )
 
-# защита от повторов
+# состояние
 last_ca = None
 waiting_for_bot_response = False
 last_sent_time = 0
+bot_message_id = None
+buy_clicked = False
+click_attempts = 0
 
 # ==================================================
 # ================= УТИЛИТЫ ========================
@@ -339,124 +353,194 @@ def extract_ca(text: str | None) -> str | None:
     matches = SOLANA_CA_REGEX.findall(text)
     return matches[0] if matches else None
 
+def random_delay(min_sec, max_sec):
+    """Случайная задержка для эмуляции человека"""
+    return random.uniform(min_sec, max_sec)
+
+async def try_click_buy(msg, attempt=1):
+    """Попытка нажать кнопку BUY с retry логикой"""
+    global waiting_for_bot_response, buy_clicked, click_attempts
+    
+    if buy_clicked:
+        return True
+    
+    if not msg.buttons:
+        print(f"{LOG} ⚠️ Кнопки отсутствуют (попытка {attempt})")
+        return False
+    
+    # Показываем все кнопки для отладки
+    if attempt == 1:
+        print(f"{LOG} 🔍 Доступные кнопки:")
+        for row_idx, row in enumerate(msg.buttons):
+            for btn_idx, button in enumerate(row):
+                print(f"     [{row_idx}][{btn_idx}] {button.text}")
+    
+    for row in msg.buttons:
+        for button in row:
+            if button.text and "buy" in button.text.lower():
+                try:
+                    print(f"{LOG} 🔘 Попытка {attempt}/{MAX_CLICK_ATTEMPTS}: Нажимаю '{button.text}'")
+                    
+                    # Небольшая случайная задержка перед кликом (эмуляция человека)
+                    await asyncio.sleep(random_delay(0.1, 0.3))
+                    
+                    await button.click()
+                    waiting_for_bot_response = False
+                    buy_clicked = True
+                    print(f"{LOG} ✅ BUY успешно нажата!")
+                    return True
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"{LOG} ❌ Ошибка (попытка {attempt}): {error_msg}")
+                    
+                    # Если это ошибка "Encrypted data invalid" - пробуем retry
+                    if "encrypted data invalid" in error_msg.lower():
+                        if attempt < MAX_CLICK_ATTEMPTS:
+                            print(f"{LOG} 🔄 Жду {RETRY_DELAY}с перед retry...")
+                            await asyncio.sleep(RETRY_DELAY)
+                            
+                            # Получаем свежее сообщение
+                            try:
+                                fresh = await client.get_messages(TARGET_BOT, ids=msg.id)
+                                if fresh:
+                                    return await try_click_buy(fresh, attempt + 1)
+                            except Exception as e2:
+                                print(f"{LOG} ❌ Ошибка получения свежего сообщения: {e2}")
+                        else:
+                            print(f"{LOG} 💀 Исчерпаны все попытки")
+                    
+                    return False
+    
+    print(f"{LOG} ⚠️ Кнопка BUY не найдена")
+    return False
+
+def get_channel_name(channel_id):
+    if channel_id == -1003735116794:
+        return "ОСНОВНОЙ"
+    elif channel_id == -1003101815766:
+        return "ТЕСТОВЫЙ"
+    else:
+        return f"ID:{channel_id}"
+
 # ==================================================
 # =============== СИГНАЛ-КАНАЛ =====================
 # ==================================================
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNEL_ID))
 async def signal_handler(event):
-    global last_ca, waiting_for_bot_response, last_sent_time
+    global last_ca, waiting_for_bot_response, last_sent_time, bot_message_id, buy_clicked, click_attempts
 
     try:
         ca = extract_ca(event.message.text)
         if not ca:
             return
 
+        channel_name = get_channel_name(event.chat_id)
+
         if ca == last_ca:
-            print(f"{LOG} CA уже обрабатывался: {ca}")
+            print(f"{LOG} 🔄 [{channel_name}] CA уже обрабатывался: {ca}")
             return
 
         last_ca = ca
         waiting_for_bot_response = True
+        bot_message_id = None
+        buy_clicked = False
+        click_attempts = 0
         
-        print(f"{LOG} Найден CA: {ca}")
+        print(f"\n{LOG} 🔍 [{channel_name}] Найден CA: {ca}")
 
-        await asyncio.sleep(SEND_DELAY)
+        # Случайная задержка (эмуляция человека)
+        delay = random_delay(SEND_DELAY_MIN, SEND_DELAY_MAX)
+        print(f"{LOG} ⏳ Задержка {delay:.2f}с перед отправкой...")
+        await asyncio.sleep(delay)
+        
         await client.send_message(TARGET_BOT, ca)
         last_sent_time = asyncio.get_event_loop().time()
-        print(f"{LOG} CA отправлен боту")
+        print(f"{LOG} 📤 [{channel_name}] CA отправлен боту")
 
     except Exception as e:
-        print(f"{LOG} Signal error: {e}")
+        print(f"{LOG} ❌ Signal error: {e}")
         waiting_for_bot_response = False
 
 # ==================================================
-# ================== БОТ ===========================
+# ============ ОБРАБОТКА ОТВЕТА БОТА ===============
 # ==================================================
 
 @client.on(events.NewMessage(from_users=TARGET_BOT))
-async def bot_handler(event):
-    global waiting_for_bot_response, last_sent_time
+async def bot_new_message_handler(event):
+    global waiting_for_bot_response, last_sent_time, bot_message_id
 
     try:
-        # Проверяем, ждём ли мы ответа
         if not waiting_for_bot_response:
             return
 
-        # Проверяем таймаут
         current_time = asyncio.get_event_loop().time()
         if current_time - last_sent_time > MAX_WAIT_TIME:
-            print(f"{LOG} Таймаут ожидания ответа бота")
+            print(f"{LOG} ⏱️ Таймаут ожидания")
             waiting_for_bot_response = False
             return
 
         msg = event.message
+        bot_message_id = msg.id
         
-        # Выводим текст сообщения для отладки
-        print(f"{LOG} Получено сообщение от бота: {msg.text[:100] if msg.text else 'без текста'}")
+        print(f"{LOG} 📩 Новое сообщение от бота (ID: {msg.id})")
         
-        if not msg.buttons:
-            print(f"{LOG} В сообщении нет кнопок")
-            return
-
-        # Выводим все кнопки для отладки
-        print(f"{LOG} Кнопки найдены:")
-        for row_idx, row in enumerate(msg.buttons):
-            for btn_idx, button in enumerate(row):
-                print(f"  [{row_idx}][{btn_idx}] {button.text}")
-
-        # Ждём перед нажатием
-        await asyncio.sleep(BUY_DELAY)
-
-        # Ищем кнопку BUY
-        buy_clicked = False
-        for row in msg.buttons:
-            for button in row:
-                if button.text and "buy" in button.text.lower():
-                    print(f"{LOG} Попытка нажать кнопку: {button.text}")
-                    try:
-                        # Используем callback_data напрямую
-                        await button.click()
-                        buy_clicked = True
-                        waiting_for_bot_response = False
-                        print(f"{LOG} ✓ Кнопка '{button.text}' нажата успешно")
-                        return
-                    except Exception as click_error:
-                        print(f"{LOG} Ошибка при нажатии кнопки: {click_error}")
-                        # Пробуем альтернативный способ
-                        try:
-                            await msg.click(data=button.data)
-                            buy_clicked = True
-                            waiting_for_bot_response = False
-                            print(f"{LOG} ✓ Кнопка нажата (альтернативный метод)")
-                            return
-                        except Exception as alt_error:
-                            print(f"{LOG} Альтернативный метод тоже не сработал: {alt_error}")
-
-        if not buy_clicked:
-            print(f"{LOG} Кнопка BUY не найдена или не удалось нажать")
-            waiting_for_bot_response = False
+        # Случайная "человеческая" задержка
+        delay = random_delay(BUY_DELAY_MIN, BUY_DELAY_MAX)
+        print(f"{LOG} ⏳ Ожидание {delay:.2f}с перед нажатием (эмуляция человека)...")
+        await asyncio.sleep(delay)
+        
+        # Получаем свежую версию и пробуем нажать
+        fresh_msg = await client.get_messages(TARGET_BOT, ids=msg.id)
+        await try_click_buy(fresh_msg)
 
     except FloodWaitError as e:
-        print(f"{LOG} FloodWait {e.seconds}s")
+        print(f"{LOG} ⏳ FloodWait {e.seconds}s")
         await asyncio.sleep(e.seconds)
 
     except Exception as e:
-        print(f"{LOG} Bot error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"{LOG} ❌ New message error: {e}")
         waiting_for_bot_response = False
+
+
+@client.on(events.MessageEdited(from_users=TARGET_BOT))
+async def bot_edited_handler(event):
+    global waiting_for_bot_response, bot_message_id, buy_clicked
+
+    try:
+        if not waiting_for_bot_response or buy_clicked:
+            return
+        
+        msg = event.message
+        
+        if bot_message_id and msg.id == bot_message_id:
+            print(f"{LOG} ✏️ Сообщение отредактировано (ID: {msg.id})")
+            
+            # Маленькая задержка после редактирования
+            await asyncio.sleep(random_delay(0.3, 0.7))
+            
+            # Пробуем нажать на обновлённую кнопку
+            await try_click_buy(msg)
+
+    except Exception as e:
+        print(f"{LOG} ❌ Edit handler error: {e}")
 
 # ==================================================
 # ================== ЗАПУСК ========================
 # ==================================================
 
 async def main():
-    print(f"{LOG} Запуск...")
+    print(f"{LOG} 🚀 Запуск...")
     await client.start()
-    print(f"{LOG} Telegram подключён")
-    print(f"{LOG} Отслеживаем канал: {SOURCE_CHANNEL_ID}")
-    print(f"{LOG} Бот: {TARGET_BOT}")
+    print(f"{LOG} ✅ Telegram подключён")
+    print(f"{LOG} 👀 Отслеживаем каналы:")
+    print(f"     📺 ОСНОВНОЙ: -1003735116794")
+    print(f"     🧪 ТЕСТОВЫЙ: -1003101815766")
+    print(f"{LOG} 🤖 Бот: {TARGET_BOT}")
+    print(f"{LOG} ⏱️ Задержка перед BUY: {BUY_DELAY_MIN}-{BUY_DELAY_MAX} сек (случайная)")
+    print(f"{LOG} 🔄 Максимум попыток нажатия: {MAX_CLICK_ATTEMPTS}")
+    print(f"{LOG} ⏳ Ожидаем сигналы...\n")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
