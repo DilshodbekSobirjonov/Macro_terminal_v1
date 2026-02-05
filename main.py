@@ -271,3 +271,193 @@ if __name__ == "__main__":
 
     while True:
         time.sleep(60)
+
+
+
+
+
+......
+
+import re
+import asyncio
+from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
+
+# ==================================================
+# ================= НАСТРОЙКИ ======================
+# ==================================================
+
+API_ID = 2886532
+API_HASH = "7df215535ba9bc5a9c7bb61102709403"
+
+SESSION_NAME = "trojan_autobuy"
+
+# канал-источник (СПИСОК — важно)
+SOURCE_CHANNEL_ID = [-1003735116794]
+
+# торговый бот
+TARGET_BOT = "@odysseus_trojanbot"
+
+# задержки
+SEND_DELAY = 0.3        # задержка перед отправкой CA
+BUY_DELAY = 1.0         # через сколько секунд жать BUY
+MAX_WAIT_TIME = 10.0    # максимальное время ожидания ответа бота
+
+LOG = "[AUTO]"
+
+# ==================================================
+# ================= REGEX ==========================
+# ==================================================
+
+SOLANA_CA_REGEX = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")
+
+# ==================================================
+# ================= КЛИЕНТ ========================
+# ==================================================
+
+client = TelegramClient(
+    SESSION_NAME,
+    API_ID,
+    API_HASH,
+    device_model="Android",
+    system_version="13",
+    app_version="10.0",
+)
+
+# защита от повторов
+last_ca = None
+waiting_for_bot_response = False
+last_sent_time = 0
+
+# ==================================================
+# ================= УТИЛИТЫ ========================
+# ==================================================
+
+def extract_ca(text: str | None) -> str | None:
+    if not text:
+        return None
+    matches = SOLANA_CA_REGEX.findall(text)
+    return matches[0] if matches else None
+
+# ==================================================
+# =============== СИГНАЛ-КАНАЛ =====================
+# ==================================================
+
+@client.on(events.NewMessage(chats=SOURCE_CHANNEL_ID))
+async def signal_handler(event):
+    global last_ca, waiting_for_bot_response, last_sent_time
+
+    try:
+        ca = extract_ca(event.message.text)
+        if not ca:
+            return
+
+        if ca == last_ca:
+            print(f"{LOG} CA уже обрабатывался: {ca}")
+            return
+
+        last_ca = ca
+        waiting_for_bot_response = True
+        
+        print(f"{LOG} Найден CA: {ca}")
+
+        await asyncio.sleep(SEND_DELAY)
+        await client.send_message(TARGET_BOT, ca)
+        last_sent_time = asyncio.get_event_loop().time()
+        print(f"{LOG} CA отправлен боту")
+
+    except Exception as e:
+        print(f"{LOG} Signal error: {e}")
+        waiting_for_bot_response = False
+
+# ==================================================
+# ================== БОТ ===========================
+# ==================================================
+
+@client.on(events.NewMessage(from_users=TARGET_BOT))
+async def bot_handler(event):
+    global waiting_for_bot_response, last_sent_time
+
+    try:
+        # Проверяем, ждём ли мы ответа
+        if not waiting_for_bot_response:
+            return
+
+        # Проверяем таймаут
+        current_time = asyncio.get_event_loop().time()
+        if current_time - last_sent_time > MAX_WAIT_TIME:
+            print(f"{LOG} Таймаут ожидания ответа бота")
+            waiting_for_bot_response = False
+            return
+
+        msg = event.message
+        
+        # Выводим текст сообщения для отладки
+        print(f"{LOG} Получено сообщение от бота: {msg.text[:100] if msg.text else 'без текста'}")
+        
+        if not msg.buttons:
+            print(f"{LOG} В сообщении нет кнопок")
+            return
+
+        # Выводим все кнопки для отладки
+        print(f"{LOG} Кнопки найдены:")
+        for row_idx, row in enumerate(msg.buttons):
+            for btn_idx, button in enumerate(row):
+                print(f"  [{row_idx}][{btn_idx}] {button.text}")
+
+        # Ждём перед нажатием
+        await asyncio.sleep(BUY_DELAY)
+
+        # Ищем кнопку BUY
+        buy_clicked = False
+        for row in msg.buttons:
+            for button in row:
+                if button.text and "buy" in button.text.lower():
+                    print(f"{LOG} Попытка нажать кнопку: {button.text}")
+                    try:
+                        # Используем callback_data напрямую
+                        await button.click()
+                        buy_clicked = True
+                        waiting_for_bot_response = False
+                        print(f"{LOG} ✓ Кнопка '{button.text}' нажата успешно")
+                        return
+                    except Exception as click_error:
+                        print(f"{LOG} Ошибка при нажатии кнопки: {click_error}")
+                        # Пробуем альтернативный способ
+                        try:
+                            await msg.click(data=button.data)
+                            buy_clicked = True
+                            waiting_for_bot_response = False
+                            print(f"{LOG} ✓ Кнопка нажата (альтернативный метод)")
+                            return
+                        except Exception as alt_error:
+                            print(f"{LOG} Альтернативный метод тоже не сработал: {alt_error}")
+
+        if not buy_clicked:
+            print(f"{LOG} Кнопка BUY не найдена или не удалось нажать")
+            waiting_for_bot_response = False
+
+    except FloodWaitError as e:
+        print(f"{LOG} FloodWait {e.seconds}s")
+        await asyncio.sleep(e.seconds)
+
+    except Exception as e:
+        print(f"{LOG} Bot error: {e}")
+        import traceback
+        traceback.print_exc()
+        waiting_for_bot_response = False
+
+# ==================================================
+# ================== ЗАПУСК ========================
+# ==================================================
+
+async def main():
+    print(f"{LOG} Запуск...")
+    await client.start()
+    print(f"{LOG} Telegram подключён")
+    print(f"{LOG} Отслеживаем канал: {SOURCE_CHANNEL_ID}")
+    print(f"{LOG} Бот: {TARGET_BOT}")
+    await client.run_until_disconnected()
+
+if __name__ == "__main__":
+    asyncio.run(main())
